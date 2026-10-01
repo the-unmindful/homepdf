@@ -4,9 +4,9 @@ HomePDF (shown as **HOME PDF** in the app) is a Windows desktop PDF reader and t
 
 ## Download and run
 
-**Windows 10/11, 64-bit:** [Download the latest portable release](https://github.com/the-unmindful/homepdf/releases/latest).
+**Windows 10/11, 64-bit:** [Download HomePDF portable](https://github.com/the-unmindful/homepdf/raw/refs/heads/main/downloads/PDFUltimate-portable-20260307-215953.zip).
 
-1. Download `PDFUltimate-portable-20260307-215953.zip` from the release assets.
+1. Download `PDFUltimate-portable-20260307-215953.zip` using the link above (or open it in `downloads/` and click **Download raw file**).
 2. Extract the entire ZIP into a writable folder.
 3. Run `PDFUltimate.exe`. Keep `_internal`, `scripts`, and `ocr_tool` beside the executable.
 4. Open a PDF in the app, or drag a PDF onto the executable.
@@ -79,8 +79,9 @@ Then open **Windows Settings > Apps > Default apps** and choose **HOME PDF** or 
 - `scripts/`: source launcher, portable build, OCR launch/setup, and PDF registration
 - `ocr_tool/`: optional OCR runner and example extraction schema
 - `docs/`: published build metadata and checksum
+- `downloads/`: verified portable Windows ZIP
 
-Virtual environments, build outputs, personal documents, session data, and model caches are excluded from Git. The ready-to-run binary is distributed through GitHub Releases.
+Virtual environments, build outputs, personal documents, session data, and model caches are excluded from Git. The ready-to-run binary is available in `downloads/`. Its SHA-256 checksum is recorded in [docs/SHA256SUMS.txt](docs/SHA256SUMS.txt).
 
 ## License
 

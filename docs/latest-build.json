@@ -7,6 +7,6 @@
   "asset": "PDFUltimate-portable-20260307-215953.zip",
   "size_bytes": 90412112,
   "sha256": "a9243dc978f19253ba0d6db7ff66d022125cb0a824fcedcc9aa665206bd3c1e6",
-  "release_tag": "v0.1.0-20260307",
-  "notes": "Latest pre-existing local build; published without rebuilding or changing the executable."
+  "notes": "Latest pre-existing local build; published without rebuilding or changing the executable.",
+  "download_url": "https://github.com/the-unmindful/homepdf/raw/refs/heads/main/downloads/PDFUltimate-portable-20260307-215953.zip"
 }
