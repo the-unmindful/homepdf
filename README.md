@@ -109,7 +109,7 @@ Then open **Windows Settings > Apps > Default apps** and choose **HOME PDF** or 
 - `downloads/`: pointers to the portable Windows release assets
 - `.github/workflows/`: Windows build and release publication
 
-Virtual environments, build outputs, personal documents, session data, and model caches are excluded from Git. The ready-to-run binary and its SHA-256 checksum are attached to the [latest release](https://github.com/the-unmindful/homepdf/releases/latest). The original October 2 build checksum is also recorded in [docs/SHA256SUMS.txt](docs/SHA256SUMS.txt).
+Virtual environments, build outputs, personal documents, session data, and model caches are excluded from Git. The ready-to-run binary and its SHA-256 checksum are attached to the [latest release](https://github.com/the-unmindful/homepdf/releases/latest). A published release's build details and checksum are also recorded in [docs/latest-build.json](docs/latest-build.json) and [docs/SHA256SUMS.txt](docs/SHA256SUMS.txt).
 
 ## License
 
