@@ -1,0 +1,92 @@
+name: Publish Windows portable release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: x64
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { throw 'Virtual environment creation failed.' }
+          & .\.venv\Scripts\python.exe -m pip install -r desktop\requirements.txt pyinstaller==6.19.0
+          if ($LASTEXITCODE -ne 0) { throw 'Build dependency installation failed.' }
+      - name: Build the portable package
+        shell: pwsh
+        run: ./scripts/build_portable.ps1 -SkipInstall
+      - name: Test automatic Start menu registration
+        shell: pwsh
+        run: |
+          & .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Start menu registration tests failed.' }
+      - name: Verify archive, icon and application startup
+        shell: pwsh
+        run: |
+          @'
+          import os, subprocess, zipfile
+          from pathlib import Path
+          archive = Path('release/PDFUltimate-portable.zip')
+          with zipfile.ZipFile(archive) as package:
+              assert package.testzip() is None, 'Corrupt ZIP entry'
+              assert 'PDFUltimate.exe' in package.namelist(), 'Missing executable'
+              assert 'Add HomePDF to Start.cmd' in package.namelist(), 'Missing shortcut helper'
+              assert package.read('_internal/pdf_ultimate/resources/app.ico') == Path('desktop/pdf_ultimate/resources/app.ico').read_bytes(), 'Packaged icon differs from source'
+          env = dict(os.environ, QT_QPA_PLATFORM='offscreen')
+          process = subprocess.Popen([str(Path('release/PDFUltimate-portable/PDFUltimate.exe').resolve())], env=env)
+          try:
+              try:
+                  code = process.wait(timeout=5)
+                  raise AssertionError(f'Application exited during startup: {code}')
+              except subprocess.TimeoutExpired:
+                  print('Portable application startup verified')
+          finally:
+              if process.poll() is None:
+                  process.terminate()
+                  process.wait(timeout=10)
+          '@ | .\.venv\Scripts\python.exe -
+          if ($LASTEXITCODE -ne 0) { throw 'Portable package verification failed.' }
+          $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'HomePDF.lnk'
+          if (-not (Test-Path -LiteralPath $shortcut)) { throw 'First launch did not create the Start menu shortcut.' }
+          $saved = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
+          $expected = (Resolve-Path -LiteralPath release\PDFUltimate-portable\PDFUltimate.exe).Path
+          if ($saved.TargetPath -ne $expected) { throw 'The automatic shortcut has the wrong executable target.' }
+          $visible = $false
+          for ($attempt = 0; $attempt -lt 20; $attempt++) {
+            if (Get-StartApps | Where-Object { $_.Name -eq 'HomePDF' }) { $visible = $true; break }
+            Start-Sleep -Seconds 1
+          }
+          if (-not $visible) { throw 'Windows did not list HomePDF in its Start app catalog.' }
+          Write-Host 'Automatic shortcut and Start app catalog visibility verified.'
+      - name: Publish ZIP and checksum
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          Copy-Item -LiteralPath release\PDFUltimate-portable.zip -Destination HomePDF-portable.zip
+          $hash = (Get-FileHash -LiteralPath HomePDF-portable.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  HomePDF-portable.zip" | Set-Content -LiteralPath SHA256SUMS.txt -Encoding ascii
+          $notes = @'
+          HomePDF portable for Windows 10/11 x64, with the white H on deep green app icon. Download HomePDF-portable.zip, extract the entire archive, and run PDFUltimate.exe. HomePDF adds its Start menu shortcut automatically on first launch. Keep all bundled folders beside the executable. No separate Python installation is required. Verify the ZIP using the attached SHA256SUMS.txt. OCR dependencies are installed separately.
+          '@
+          $notes | Set-Content -LiteralPath release-notes.md -Encoding utf8
+          gh release create "$env:RELEASE_TAG" HomePDF-portable.zip SHA256SUMS.txt --verify-tag --title "HomePDF $env:RELEASE_TAG — Windows portable" --notes-file release-notes.md --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }

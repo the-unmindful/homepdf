@@ -6,14 +6,14 @@ HomePDF (shown as **HOME PDF** in the app) is a Windows desktop PDF reader and t
 
 ## Download and run
 
-**Windows 10/11, 64-bit:** [Download HomePDF portable](https://github.com/the-unmindful/homepdf/raw/refs/heads/main/downloads/HomePDF-portable.zip).
+**Windows 10/11, 64-bit:** [Download HomePDF portable](https://github.com/the-unmindful/homepdf/releases/latest/download/HomePDF-portable.zip). See the [latest release](https://github.com/the-unmindful/homepdf/releases/latest) for its build details and checksum.
 
-1. Download `HomePDF-portable.zip` using the link above (or open it in `downloads/` and click **Download raw file**).
+1. Download `HomePDF-portable.zip` using the link above or from the release's **Assets** list.
 2. Extract the entire ZIP into a writable folder.
 3. Run `PDFUltimate.exe`. Keep `_internal`, `scripts`, and `ocr_tool` beside the executable.
 4. Open a PDF in the app, or drag a PDF onto the executable.
 
-The reader requires no Python installation. The current package was rebuilt on **October 2, 2026**, build `20261002-010304`, with the green H app icon and Start menu shortcut helper. Source package version is `0.1.0`.
+The reader requires no Python installation. The portable package includes the white H on deep green app icon and creates its HomePDF Start menu shortcut when first opened. Source package version is `0.1.1`. See the release page for the current build and checksum.
 
 Windows may show an unsigned-app prompt. Settings and outputs normally live in `Documents\HOME PDF`. To keep them beside the executable, create an empty `portable.flag` file in the extracted folder; data will then use `HOME PDF_DATA`.
 
@@ -50,6 +50,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1
 
 The script installs PyInstaller and desktop dependencies, then writes a dated ZIP and folder under `release`. It also refreshes `release\PDFUltimate-portable` and its ZIP. Use `-SkipInstall` only when those build dependencies are already installed. No installer is included in this release.
 
+## Publish a release
+
+Portable downloads belong in GitHub Releases; do not commit ZIP files to the repository. To publish a new Windows build, push a new version tag:
+
+```powershell
+git tag v0.1.2
+git push origin v0.1.2
+```
+
+Use the next unused version number. The **Publish Windows portable release** workflow builds on Windows with Python 3.11, checks the packaged app, and publishes `HomePDF-portable.zip` and `SHA256SUMS.txt` as release assets. The main download link follows the latest release automatically. An existing tag or release is not overwritten.
+
 ## Optional OCR
 
 OCR requires a separate project-local Python environment and an NVIDIA GPU with CUDA support. Python, CUDA PyTorch, and model weights are **not bundled** with the portable reader. Initial installation and model download require internet access; subsequent runs can use the local cache.
@@ -67,13 +78,15 @@ See [the OCR guide](ocr_tool/README.md) for modes, page selection, and output fo
 
 ## Add HomePDF to the Windows Start menu
 
-From the extracted portable folder, run:
+Open `PDFUltimate.exe` once after extracting the ZIP. HomePDF automatically creates a current-user Start menu shortcut with the green H icon. No administrator access or terminal commands are required. Keep the extracted folder in its chosen location; if you move it, open the executable again to update the shortcut.
+
+You can also double-click **Add HomePDF to Start.cmd** in the extracted folder. For a source checkout or a custom executable location, the PowerShell helper remains available:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\create_start_menu_shortcut.ps1
 ```
 
-This creates a current-user **HomePDF** shortcut with the green H icon. Keep the portable folder in its chosen location. Use `-DesktopShortcut` to also add a desktop shortcut. From a source checkout, the script targets `release\PDFUltimate-portable\PDFUltimate.exe` by default, or accepts `-ExePath`.
+Use `-DesktopShortcut` to also add a desktop shortcut. From a source checkout, the script targets `release\PDFUltimate-portable\PDFUltimate.exe` by default, or accepts `-ExePath`.
 
 To regenerate the icon, run `scripts\make_icon.ps1` on Windows. The portable build embeds the icon in the executable and bundles it for the app window and taskbar.
 
@@ -93,9 +106,10 @@ Then open **Windows Settings > Apps > Default apps** and choose **HOME PDF** or 
 - `scripts/`: source launcher, portable build, OCR launch/setup, and PDF registration
 - `ocr_tool/`: optional OCR runner and example extraction schema
 - `docs/`: published build metadata and checksum
-- `downloads/`: verified portable Windows ZIP
+- `downloads/`: pointers to the portable Windows release assets
+- `.github/workflows/`: Windows build and release publication
 
-Virtual environments, build outputs, personal documents, session data, and model caches are excluded from Git. The ready-to-run binary is available in `downloads/`. Its SHA-256 checksum is recorded in [docs/SHA256SUMS.txt](docs/SHA256SUMS.txt).
+Virtual environments, build outputs, personal documents, session data, and model caches are excluded from Git. The ready-to-run binary and its SHA-256 checksum are attached to the [latest release](https://github.com/the-unmindful/homepdf/releases/latest). The original October 2 build checksum is also recorded in [docs/SHA256SUMS.txt](docs/SHA256SUMS.txt).
 
 ## License
 

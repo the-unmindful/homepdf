@@ -25,6 +25,7 @@ $exe = (Resolve-Path -LiteralPath $ExePath).Path
 $appFolder = Split-Path -Parent $exe
 $startMenu = [Environment]::GetFolderPath('Programs')
 if (-not $startMenu) { throw 'The current-user Start menu folder could not be resolved.' }
+New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
 $shell = New-Object -ComObject WScript.Shell
 $shortcutPaths = @((Join-Path $startMenu 'HomePDF.lnk'))
 if ($DesktopShortcut) {
@@ -37,6 +38,13 @@ foreach ($shortcutPath in $shortcutPaths) {
     $shortcut.IconLocation = "$exe,0"
     $shortcut.Description = 'HomePDF PDF reader and toolkit'
     $shortcut.Save()
+    if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) {
+        throw "Windows did not create the shortcut: $shortcutPath"
+    }
+    $saved = $shell.CreateShortcut($shortcutPath)
+    if (-not $saved.TargetPath.Equals($exe, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "The saved HomePDF shortcut does not point to $exe."
+    }
     Write-Host "Created: $shortcutPath"
 }
-Write-Host 'HomePDF is now available in Start. Keep its portable folder in this location.'
+Write-Host 'HomePDF shortcut saved. Windows will add it to Start. Keep its portable folder in this location.'

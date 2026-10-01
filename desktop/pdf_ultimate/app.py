@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 from pdf_ultimate.ui.main_window import PdfUltimateMainWindow
 from pdf_ultimate.ui.theme import STYLE_SHEET
 from pdf_ultimate.core.process_pool import shutdown_process_pool
+from pdf_ultimate.windows_integration import ensure_start_menu_shortcut
 
 _SINGLE_INSTANCE_SERVER = "pdf-ultimate-single-instance-v2"
 _ACTIVATE_TOKEN = "__ACTIVATE__"
@@ -161,6 +162,13 @@ def run() -> int:
     bridge.activateRequested.connect(window.activateWindow)
     bridge.activateRequested.connect(window.raise_)
     window.show()
+    def register_start_shortcut() -> None:
+        if ensure_start_menu_shortcut() is False:
+            window.statusBar().showMessage(
+                'Could not add HomePDF to Start. Run "Add HomePDF to Start.cmd" in the app folder to try again.',
+                20000,
+            )
+    QTimer.singleShot(0, register_start_shortcut)
     if startup_paths:
         QTimer.singleShot(0, lambda: window.open_documents(startup_paths))
     else:
