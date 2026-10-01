@@ -34,8 +34,14 @@ jobs:
       - name: Test automatic Start menu registration
         shell: pwsh
         run: |
-          & .\.venv\Scripts\python.exe -m unittest discover -s tests -v
-          if ($LASTEXITCODE -ne 0) { throw 'Start menu registration tests failed.' }
+          $testOutput = & .\.venv\Scripts\python.exe -m unittest discover -s tests -v 2>&1
+          $testCode = $LASTEXITCODE
+          $testOutput | ForEach-Object { Write-Host $_ }
+          if ($testCode -ne 0) {
+            $detail = ($testOutput -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Host "::error::$detail"
+            throw 'Start menu registration tests failed.'
+          }
       - name: Verify archive, icon and application startup
         shell: pwsh
         run: |

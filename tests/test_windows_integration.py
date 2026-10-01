@@ -13,7 +13,7 @@ class StartMenuRegistrationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.folder = Path(self.temp.name)
+        self.folder = Path(self.temp.name).resolve()
         self.exe = self.folder / 'PDFUltimate.exe'
         self.exe.touch()
         (self.folder / 'scripts').mkdir()
