@@ -45,8 +45,14 @@ jobs:
       - name: Verify archive, icon and application startup
         shell: pwsh
         run: |
+          trap {
+            $detail = $_.Exception.Message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Host "::error::$detail"
+            throw
+          }
+          $env:HOMEPDF_TEST_SHORTCUT = Join-Path ([Environment]::GetFolderPath('Programs')) 'HomePDF.lnk'
           @'
-          import os, subprocess, zipfile
+          import os, subprocess, time, zipfile
           from pathlib import Path
           archive = Path('release/PDFUltimate-portable.zip')
           with zipfile.ZipFile(archive) as package:
@@ -57,11 +63,15 @@ jobs:
           env = dict(os.environ, QT_QPA_PLATFORM='offscreen')
           process = subprocess.Popen([str(Path('release/PDFUltimate-portable/PDFUltimate.exe').resolve())], env=env)
           try:
-              try:
-                  code = process.wait(timeout=5)
-                  raise AssertionError(f'Application exited during startup: {code}')
-              except subprocess.TimeoutExpired:
-                  print('Portable application startup verified')
+              shortcut = Path(os.environ['HOMEPDF_TEST_SHORTCUT'])
+              deadline = time.monotonic() + 30
+              while not shortcut.is_file() and time.monotonic() < deadline:
+                  if process.poll() is not None:
+                      raise AssertionError(f'Application exited during startup: {process.returncode}')
+                  time.sleep(0.25)
+              assert shortcut.is_file(), 'First launch did not create its shortcut within 30 seconds'
+              assert process.poll() is None, 'Application exited after shortcut registration'
+              print('Portable startup and automatic shortcut creation verified')
           finally:
               if process.poll() is None:
                   process.terminate()
