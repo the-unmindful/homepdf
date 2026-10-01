@@ -2,16 +2,18 @@
 
 HomePDF (shown as **HOME PDF** in the app) is a Windows desktop PDF reader and toolkit built with PySide6 and PyMuPDF. PDF reading and editing run locally on your computer.
 
+![HomePDF icon](desktop/pdf_ultimate/resources/app.png)
+
 ## Download and run
 
-**Windows 10/11, 64-bit:** [Download HomePDF portable](https://github.com/the-unmindful/homepdf/raw/refs/heads/main/downloads/PDFUltimate-portable-20260307-215953.zip).
+**Windows 10/11, 64-bit:** [Download HomePDF portable](https://github.com/the-unmindful/homepdf/raw/refs/heads/main/downloads/HomePDF-portable.zip).
 
-1. Download `PDFUltimate-portable-20260307-215953.zip` using the link above (or open it in `downloads/` and click **Download raw file**).
+1. Download `HomePDF-portable.zip` using the link above (or open it in `downloads/` and click **Download raw file**).
 2. Extract the entire ZIP into a writable folder.
 3. Run `PDFUltimate.exe`. Keep `_internal`, `scripts`, and `ocr_tool` beside the executable.
 4. Open a PDF in the app, or drag a PDF onto the executable.
 
-The reader requires no Python installation. The published package is the latest existing local build, **March 7, 2026**, build `20260307-215953`, with source package version `0.1.0`.
+The reader requires no Python installation. The current package was rebuilt on **October 2, 2026**, build `20261002-010304`, with the green H app icon and Start menu shortcut helper. Source package version is `0.1.0`.
 
 Windows may show an unsigned-app prompt. Settings and outputs normally live in `Documents\HOME PDF`. To keep them beside the executable, create an empty `portable.flag` file in the extracted folder; data will then use `HOME PDF_DATA`.
 
@@ -62,6 +64,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_ocr.ps1 --help
 In the app's OCR tab, point **OCR Command** to the checkout's `scripts\ocr.bat`. For a portable folder, create `.venv` there, install `ocr_tool\requirements.txt` plus the CUDA PyTorch versions specified in [the installation script](scripts/install_ocr_dependencies.ps1), and select that folder's `scripts\ocr.bat`.
 
 See [the OCR guide](ocr_tool/README.md) for modes, page selection, and output formats.
+
+## Add HomePDF to the Windows Start menu
+
+From the extracted portable folder, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\create_start_menu_shortcut.ps1
+```
+
+This creates a current-user **HomePDF** shortcut with the green H icon. Keep the portable folder in its chosen location. Use `-DesktopShortcut` to also add a desktop shortcut. From a source checkout, the script targets `release\PDFUltimate-portable\PDFUltimate.exe` by default, or accepts `-ExePath`.
+
+To regenerate the icon, run `scripts\make_icon.ps1` on Windows. The portable build embeds the icon in the executable and bundles it for the app window and taskbar.
 
 ## Choose HomePDF as your PDF reader
 

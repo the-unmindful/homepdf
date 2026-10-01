@@ -1,4 +1,4 @@
-param(
+﻿param(
   [switch]$SkipInstall
 )
 
@@ -35,7 +35,7 @@ $pyiArgs = @(
   '--collect-all', 'docx'
 )
 if (Test-Path $iconPath) {
-  $pyiArgs += @('--icon', $iconPath)
+  $pyiArgs += @('--icon', $iconPath, '--add-data', "${iconPath};pdf_ultimate/resources")
 }
 $pyiArgs += 'desktop\main.py'
 
@@ -72,6 +72,7 @@ New-Item -ItemType Directory -Force (Join-Path $portableOcrToolDir 'input') | Ou
 New-Item -ItemType Directory -Force (Join-Path $portableOcrToolDir 'output') | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $portableOcrToolDir 'cache') | Out-Null
 
+Copy-Item 'scripts\create_start_menu_shortcut.ps1' (Join-Path $portableScriptsDir 'create_start_menu_shortcut.ps1') -Force
 Copy-Item 'scripts\ocr.bat' (Join-Path $portableScriptsDir 'ocr.bat') -Force
 Copy-Item 'scripts\run_ocr.ps1' (Join-Path $portableScriptsDir 'run_ocr.ps1') -Force
 Copy-Item 'ocr_tool\OCR.py' (Join-Path $portableOcrToolDir 'OCR.py') -Force

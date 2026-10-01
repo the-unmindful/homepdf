@@ -1,12 +1,12 @@
 {
   "application": "HomePDF",
   "source_version": "0.1.0",
-  "build_id": "20260307-215953",
-  "build_date": "2026-03-07",
+  "build_id": "20261002-010304",
+  "build_date": "2026-10-02",
   "platform": "Windows x64",
-  "asset": "PDFUltimate-portable-20260307-215953.zip",
-  "size_bytes": 90412112,
-  "sha256": "a9243dc978f19253ba0d6db7ff66d022125cb0a824fcedcc9aa665206bd3c1e6",
-  "notes": "Latest pre-existing local build; published without rebuilding or changing the executable.",
-  "download_url": "https://github.com/the-unmindful/homepdf/raw/refs/heads/main/downloads/PDFUltimate-portable-20260307-215953.zip"
+  "asset": "HomePDF-portable.zip",
+  "size_bytes": 91709015,
+  "sha256": "449a06b446bd144e07bd56598c22556fd4fad34b55c9a459d4b6a5b54a45a34d",
+  "notes": "Rebuilt with the SnagItOpen-style white H on deep green icon, embedded executable/runtime resources, and Start menu shortcut helper.",
+  "download_url": "https://github.com/the-unmindful/homepdf/raw/refs/heads/main/downloads/HomePDF-portable.zip"
 }

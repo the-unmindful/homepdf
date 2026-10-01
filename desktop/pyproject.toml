@@ -24,3 +24,6 @@ include-package-data = true
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pdf_ultimate*"]
+
+[tool.setuptools.package-data]
+pdf_ultimate = ["resources/*.ico", "resources/*.png"]
