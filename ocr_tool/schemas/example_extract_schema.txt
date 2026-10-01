@@ -1,0 +1,13 @@
+Return JSON only.
+
+Schema:
+{
+  "document_type": "string",
+  "entities": [
+    {
+      "label": "string",
+      "value": "string"
+    }
+  ],
+  "summary": "string"
+}

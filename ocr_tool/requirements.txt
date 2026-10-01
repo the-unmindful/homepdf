@@ -1,0 +1,7 @@
+accelerate
+pdf2image
+Pillow
+PyMuPDF
+safetensors
+sentencepiece
+git+https://github.com/huggingface/transformers.git

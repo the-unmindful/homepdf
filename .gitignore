@@ -1,0 +1,25 @@
+# Environments and Python caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+# Generated builds and local application data
+build/
+dist/
+release/
+output/
+runtime_data/
+temp/
+HOME PDF_DATA/
+*.spec
+# OCR inputs, outputs and downloaded models
+ocr_tool/cache/
+ocr_tool/input/
+ocr_tool/output/
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.log
