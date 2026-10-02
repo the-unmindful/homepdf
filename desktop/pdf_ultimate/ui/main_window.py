@@ -11,9 +11,10 @@ import sys
 
 import fitz
 from PySide6.QtCore import QByteArray, QEvent, QObject, QPoint, QRect, QSize, Qt, QTimer, Signal, QProcess, QProcessEnvironment, QUrl
-from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QImage, QKeySequence, QPainter, QPixmap, QTextCursor, QDesktopServices
+from PySide6.QtGui import QAction, QActionGroup, QColor, QGuiApplication, QIcon, QImage, QKeySequence, QPainter, QPalette, QPen, QPixmap, QTextCursor, QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QBoxLayout,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -34,8 +36,11 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QStatusBar,
+    QStyle,
+    QStyleOptionComboBox,
     QTabBar,
     QTabWidget,
+    QToolButton,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -48,6 +53,8 @@ from pdf_ultimate.core.render_service import PdfRenderService
 from pdf_ultimate.core.job_service import JobService
 from pdf_ultimate.core.state_store import AppStateStore, DocumentViewState
 from pdf_ultimate.ui.continuous_view import ContinuousPageView
+from pdf_ultimate.ui.selectable_page import SelectablePageLabel
+from pdf_ultimate.ui.reader_controls import icon_button, reader_icon
 
 
 class FileDropListWidget(QListWidget):
@@ -109,221 +116,20 @@ class _AsyncBridge(QObject):
 
 
 
-class SelectablePageLabel(QLabel):
-    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
-        super().__init__(text, parent)
-        self._selection_enabled = False
-        self._zoom = 1.0
-        self._page_words: list[tuple[float, float, float, float, str, int, int, int]] = []
-        self._selected_word_indexes: set[int] = set()
-        self._selected_text = ""
-        self._drag_start_page: tuple[float, float] | None = None
-        self._drag_rect_page: tuple[float, float, float, float] | None = None
-        self.setFocusPolicy(Qt.StrongFocus)
-        self.setMouseTracking(True)
+class VisibleComboBox(QComboBox):
+    """Keep the dropdown affordance visible with the custom Qt stylesheet."""
 
-    def set_selection_mode(self, enabled: bool) -> None:
-        self._selection_enabled = bool(enabled)
-        if not self._selection_enabled:
-            self.clear_selection()
-        self.update()
-
-    def set_page_words(self, words: list[tuple], zoom: float) -> None:
-        normalized: list[tuple[float, float, float, float, str, int, int, int]] = []
-        for word in words:
-            if len(word) < 8:
-                continue
-            normalized.append(
-                (
-                    float(word[0]),
-                    float(word[1]),
-                    float(word[2]),
-                    float(word[3]),
-                    str(word[4]),
-                    int(word[5]),
-                    int(word[6]),
-                    int(word[7]),
-                )
-            )
-        self._page_words = normalized
-        self._zoom = max(0.001, float(zoom))
-        self.clear_selection()
-
-    def clear_selection(self) -> None:
-        self._selected_word_indexes.clear()
-        self._selected_text = ""
-        self._drag_start_page = None
-        self._drag_rect_page = None
-        self.update()
-
-    def selected_text(self) -> str:
-        return self._selected_text
-
-    def _pixmap_rect(self) -> QRect:
-        pixmap = self.pixmap()
-        if pixmap is None or pixmap.isNull():
-            return QRect(0, 0, self.width(), self.height())
-        logical = pixmap.deviceIndependentSize().toSize()
-        width = max(1, logical.width())
-        height = max(1, logical.height())
-        x = 0
-        y = 0
-        alignment = self.alignment()
-        if alignment & Qt.AlignHCenter:
-            x = (self.width() - width) // 2
-        elif alignment & Qt.AlignRight:
-            x = self.width() - width
-        if alignment & Qt.AlignVCenter:
-            y = (self.height() - height) // 2
-        elif alignment & Qt.AlignBottom:
-            y = self.height() - height
-        return QRect(x, y, width, height)
-
-    def _point_to_page(self, point: QPoint, *, clamp: bool = False) -> tuple[float, float] | None:
-        area = self._pixmap_rect()
-        if area.width() <= 0 or area.height() <= 0:
-            return None
-        x = point.x()
-        y = point.y()
-        if clamp:
-            x = max(area.left(), min(area.left() + area.width() - 1, x))
-            y = max(area.top(), min(area.top() + area.height() - 1, y))
-        elif not area.contains(point):
-            return None
-        return ((x - area.left()) / self._zoom, (y - area.top()) / self._zoom)
-
-    @staticmethod
-    def _rect_intersects(
-        a: tuple[float, float, float, float],
-        b: tuple[float, float, float, float],
-    ) -> bool:
-        ax0, ay0, ax1, ay1 = a
-        bx0, by0, bx1, by1 = b
-        return not (ax1 < bx0 or ax0 > bx1 or ay1 < by0 or ay0 > by1)
-
-    def _word_indexes_for_rect(self, rect: tuple[float, float, float, float]) -> set[int]:
-        x0, y0, x1, y1 = rect
-        if x0 > x1:
-            x0, x1 = x1, x0
-        if y0 > y1:
-            y0, y1 = y1, y0
-        drag_rect = (x0, y0, x1, y1)
-        result: set[int] = set()
-        for idx, (wx0, wy0, wx1, wy1, _text, _block, _line, _word) in enumerate(self._page_words):
-            if self._rect_intersects(drag_rect, (wx0, wy0, wx1, wy1)):
-                result.add(idx)
-        return result
-
-    def _build_selected_text(self, indexes: set[int]) -> str:
-        if not indexes:
-            return ""
-        ordered = sorted((self._page_words[idx] for idx in indexes), key=lambda item: (item[5], item[6], item[7]))
-        parts: list[str] = []
-        prev_block: int | None = None
-        prev_line: int | None = None
-        for _x0, _y0, _x1, _y1, text, block, line, _word in ordered:
-            if prev_block is None:
-                parts.append(text)
-            elif block != prev_block:
-                parts.append("\n\n")
-                parts.append(text)
-            elif line != prev_line:
-                parts.append("\n")
-                parts.append(text)
-            else:
-                parts.append(" ")
-                parts.append(text)
-            prev_block = block
-            prev_line = line
-        return "".join(parts).strip()
-
-    def mousePressEvent(self, event) -> None:  # type: ignore[override]
-        if not self._selection_enabled or event.button() != Qt.LeftButton:
-            super().mousePressEvent(event)
-            return
-        page_point = self._point_to_page(event.position().toPoint(), clamp=False)
-        if page_point is None:
-            self.clear_selection()
-            event.accept()
-            return
-        self.setFocus(Qt.MouseFocusReason)
-        self._drag_start_page = page_point
-        self._drag_rect_page = (page_point[0], page_point[1], page_point[0], page_point[1])
-        self._selected_word_indexes = self._word_indexes_for_rect(self._drag_rect_page)
-        self._selected_text = self._build_selected_text(self._selected_word_indexes)
-        self.update()
-        event.accept()
-
-    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
-        if not self._selection_enabled or self._drag_start_page is None:
-            super().mouseMoveEvent(event)
-            return
-        page_point = self._point_to_page(event.position().toPoint(), clamp=True)
-        if page_point is None:
-            return
-        sx, sy = self._drag_start_page
-        self._drag_rect_page = (sx, sy, page_point[0], page_point[1])
-        self._selected_word_indexes = self._word_indexes_for_rect(self._drag_rect_page)
-        self._selected_text = self._build_selected_text(self._selected_word_indexes)
-        self.update()
-        event.accept()
-
-    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
-        if not self._selection_enabled or event.button() != Qt.LeftButton:
-            super().mouseReleaseEvent(event)
-            return
-        if self._drag_start_page is None:
-            return
-        page_point = self._point_to_page(event.position().toPoint(), clamp=True)
-        if page_point is not None:
-            sx, sy = self._drag_start_page
-            self._drag_rect_page = (sx, sy, page_point[0], page_point[1])
-            self._selected_word_indexes = self._word_indexes_for_rect(self._drag_rect_page)
-            self._selected_text = self._build_selected_text(self._selected_word_indexes)
-        self._drag_start_page = None
-        self.update()
-        event.accept()
-
-    def keyPressEvent(self, event) -> None:  # type: ignore[override]
-        if self._selection_enabled and event.matches(QKeySequence.Copy):
-            if self._selected_text:
-                QApplication.clipboard().setText(self._selected_text)
-                event.accept()
-                return
-        super().keyPressEvent(event)
-
-    def paintEvent(self, event) -> None:  # type: ignore[override]
+    def paintEvent(self, event) -> None:
         super().paintEvent(event)
-        if not self._selection_enabled:
-            return
-        if not self._selected_word_indexes and self._drag_rect_page is None:
-            return
-
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        rect = self.style().subControlRect(QStyle.CC_ComboBox, option, QStyle.SC_ComboBoxArrow, self)
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        area = self._pixmap_rect()
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(76, 141, 247, 88))
-        for idx in self._selected_word_indexes:
-            if idx < 0 or idx >= len(self._page_words):
-                continue
-            x0, y0, x1, y1, _text, _block, _line, _word = self._page_words[idx]
-            x = area.left() + int(x0 * self._zoom)
-            y = area.top() + int(y0 * self._zoom)
-            w = max(2, int((x1 - x0) * self._zoom))
-            h = max(2, int((y1 - y0) * self._zoom))
-            painter.drawRect(x, y, w, h)
-
-        if self._drag_rect_page is not None:
-            x0, y0, x1, y1 = self._drag_rect_page
-            left = area.left() + int(min(x0, x1) * self._zoom)
-            top = area.top() + int(min(y0, y1) * self._zoom)
-            width = max(1, int(abs(x1 - x0) * self._zoom))
-            height = max(1, int(abs(y1 - y0) * self._zoom))
-            painter.setPen(QColor(47, 114, 225, 210))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRect(left, top, width, height)
-
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(self.palette().color(QPalette.Text), 2))
+        center = rect.center()
+        painter.drawLine(center.x() - 4, center.y() - 2, center.x(), center.y() + 2)
+        painter.drawLine(center.x(), center.y() + 2, center.x() + 4, center.y() - 2)
         painter.end()
 
 
@@ -333,6 +139,31 @@ class FlexibleWidthRow(QWidget):
     def minimumSizeHint(self) -> QSize:  # type: ignore[override]
         hint = super().minimumSizeHint()
         return QSize(120, hint.height())
+
+
+class ResponsiveReaderToolbar(FlexibleWidthRow):
+    def __init__(self, primary: QWidget, secondary: QWidget, page_label: QLabel):
+        super().__init__()
+        self._groups = (primary, secondary)
+        self._page_label = page_label
+        self._row = QBoxLayout(QBoxLayout.LeftToRight)
+        self._row.setContentsMargins(0, 0, 0, 0)
+        self._row.setSpacing(6)
+        self._row.addWidget(primary)
+        self._row.addWidget(secondary)
+        self.setLayout(self._row)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        # The page spinner already exposes the current page; its longer label
+        # can yield space on narrow readers without losing an action.
+        self._page_label.setVisible(self.width() >= 500)
+        needed = sum(group.layout().minimumSize().width() for group in self._groups) + self._row.spacing()
+        direction = QBoxLayout.LeftToRight if self.width() >= needed else QBoxLayout.TopToBottom
+        if self._row.direction() != direction:
+            self._row.setDirection(direction)
+            self.updateGeometry()
 
 
 class PdfUltimateMainWindow(QMainWindow):
@@ -347,6 +178,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self.state_store = AppStateStore()
+        self.theme_mode = str(self.state_store.get_ui('theme', 'system')).lower()
         self.toolkit = PdfToolkit(output_root=output_root())
         # OCR integration (external runner)
         self._ocr_process: QProcess | None = None
@@ -365,8 +197,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.current_page_index = 0
         self.zoom_factor = 1.0
         self.fit_mode = "width"  # width | page | manual
-        default_view = str(self.state_store.get_ui("default_view_mode", "continuous")).lower()
-        self.view_mode = "continuous" if default_view.startswith("continuous") else "single"
+        self.view_mode = "continuous"
         self.merge_sources: list[Path] = []
         self.to_pdf_sources: list[Path] = []
         self.page_order: list[int] = []
@@ -469,7 +300,44 @@ class PdfUltimateMainWindow(QMainWindow):
         self.navigation_combo.setAccessibleName("Navigation pane")
         self.search_input.setAccessibleName("Find in document")
         self._refresh_recent_files_menu()
+        self._set_theme_mode(self.theme_mode, persist=False)
+        if app is not None:
+            app.styleHints().colorSchemeChanged.connect(self._system_theme_changed)
         self.statusBar().showMessage("Ready. Drop a PDF or click Open PDF.")
+
+    def _build_theme_menu(self) -> None:
+        menu = QMenu(self.theme_button)
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        self.theme_actions = {}
+        for mode in ('system', 'light', 'dark'):
+            action = QAction(mode.title(), menu)
+            action.setCheckable(True)
+            group.addAction(action)
+            menu.addAction(action)
+            action.triggered.connect(lambda checked=False, choice=mode: self._set_theme_mode(choice))
+            self.theme_actions[mode] = action
+        self.theme_button.setMenu(menu)
+
+    def _set_theme_mode(self, mode: str, *, persist=True) -> None:
+        from .theme import apply_theme
+        self.theme_mode = mode if mode in {'system', 'light', 'dark'} else 'system'
+        resolved = apply_theme(self.theme_mode)
+        if persist:
+            self.state_store.set_ui('theme', self.theme_mode)
+        self.theme_actions[self.theme_mode].setChecked(True)
+        self.theme_button.setIcon(reader_icon('theme-' + self.theme_mode))
+        label = f'Theme: {self.theme_mode.title()}' + (f' ({resolved.title()})' if self.theme_mode == 'system' else '')
+        self.theme_button.setToolTip(label)
+        self.theme_button.setAccessibleName(label)
+        for button, name in [(self.fit_width_btn, 'fit-width'), (self.fit_page_btn, 'fit-page'), (self.actual_size_btn, 'actual-size'), (self.find_btn, 'search')]:
+            button.setIcon(reader_icon(name))
+        self._sync_panel_toggle_labels()
+        self.continuous_view.update()
+
+    def _system_theme_changed(self, *_args) -> None:
+        if self.theme_mode == 'system':
+            self._set_theme_mode('system', persist=False)
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("File")
@@ -648,10 +516,10 @@ class PdfUltimateMainWindow(QMainWindow):
 
         self.meta_label = QLabel("No document loaded.")
         self.meta_label.setWordWrap(True)
-        self.meta_label.setStyleSheet("color:#26382e;background:#edf2ee;padding:10px;border-radius:10px;")
+        self.meta_label.setStyleSheet('padding:8px 0;')
         layout.addWidget(self.meta_label)
 
-        self.navigation_combo = QComboBox()
+        self.navigation_combo = VisibleComboBox()
         self.navigation_combo.addItems(['Pages', 'Outline', 'Merge'])
         self.navigation_stack = QStackedWidget()
         self.navigation_combo.currentIndexChanged.connect(self.navigation_stack.setCurrentIndex)
@@ -717,13 +585,13 @@ class PdfUltimateMainWindow(QMainWindow):
         toolbar = QHBoxLayout()
         toolbar.setContentsMargins(0, 0, 0, 0)
         toolbar.setSpacing(10)
-        self.left_toggle_btn = QPushButton("Navigation")
+        self.left_toggle_btn = icon_button('navigation', 'Show navigation pane', checkable=True)
         self.left_toggle_btn.clicked.connect(self._toggle_left_panel)
         prev_btn = QPushButton("Prev")
         prev_btn.clicked.connect(lambda: self._set_page(self.current_page_index - 1))
         next_btn = QPushButton("Next")
         next_btn.clicked.connect(lambda: self._set_page(self.current_page_index + 1))
-        self.view_mode_combo = QComboBox()
+        self.view_mode_combo = VisibleComboBox()
         self.view_mode_combo.addItems(["Single", "Continuous"])
         self.view_mode_combo.setCurrentText("Continuous" if self.view_mode == "continuous" else "Single")
         self.view_mode_combo.currentTextChanged.connect(self._on_view_mode_changed)
@@ -733,25 +601,34 @@ class PdfUltimateMainWindow(QMainWindow):
         zoom_out.clicked.connect(lambda: self._change_zoom(1 / 1.15))
         zoom_in = QPushButton("+")
         zoom_in.clicked.connect(lambda: self._change_zoom(1.15))
-        fit_width_btn = QPushButton("Fit Width")
-        fit_width_btn.clicked.connect(self._fit_width)
-        fit_btn = QPushButton("Fit Page")
-        fit_btn.clicked.connect(self._fit_page)
-        actual_size_btn = QPushButton("100%")
-        actual_size_btn.clicked.connect(self._actual_size)
-        self.zoom_combo = QComboBox()
+        self.fit_width_btn = icon_button('fit-width', 'Fit width', checkable=True)
+        self.fit_width_btn.clicked.connect(self._fit_width)
+        self.fit_page_btn = icon_button('fit-page', 'Fit page', checkable=True)
+        self.fit_page_btn.clicked.connect(self._fit_page)
+        self.actual_size_btn = icon_button('actual-size', 'Actual size (100%)', checkable=True)
+        self.actual_size_btn.clicked.connect(self._actual_size)
+        self.zoom_combo = VisibleComboBox()
         self.zoom_combo.setEditable(True)
-        self.zoom_combo.setMaximumWidth(96)
+        self.zoom_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.zoom_combo.setMinimumContentsLength(4)
+        self.zoom_combo.setMinimumWidth(92)
+        self.zoom_combo.setMaximumWidth(124)
+        self.zoom_combo.view().setMinimumWidth(190)
+        self.zoom_combo.addItems(['Fit Width', 'Fit Page', 'Actual Size (100%)'])
+        self.zoom_combo.insertSeparator(3)
         self.zoom_combo.addItems(self.zoom_presets)
         self.zoom_combo.activated.connect(self._on_zoom_combo_changed)
         if self.zoom_combo.lineEdit() is not None:
             self.zoom_combo.lineEdit().editingFinished.connect(self._on_zoom_combo_changed)
-        self.text_tool_combo = QComboBox()
-        self.text_tool_combo.addItems(["View", "Select Text", "Convert2Text"])
+        self.text_tool_combo = VisibleComboBox()
+        self.text_tool_combo.addItems(["View", "Select Text", "Extracted Text"])
         self.text_tool_combo.setCurrentText("View")
         self.text_tool_combo.currentTextChanged.connect(self._on_text_tool_combo_changed)
-        self.right_toggle_btn = QPushButton("Tools")
+        self.right_toggle_btn = icon_button('tools', 'Show tools pane', checkable=True)
         self.right_toggle_btn.clicked.connect(self._toggle_right_panel)
+        self.theme_button = icon_button('theme-system', 'Theme: System')
+        self.theme_button.setPopupMode(QToolButton.InstantPopup)
+        self._build_theme_menu()
         self.page_jump_spin = QSpinBox()
         self.page_jump_spin.setRange(1, 1)
         self.page_jump_spin.setMaximumWidth(78)
@@ -761,30 +638,37 @@ class PdfUltimateMainWindow(QMainWindow):
 
         self.page_label = QLabel("Page - / -")
         self.page_label.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        self.page_label.setStyleSheet("font-weight:700;color:#195b38;")
+        self.page_label.setStyleSheet('font-weight:600;')
 
-        find_btn = QPushButton('Find')
-        find_btn.clicked.connect(self._show_search_bar)
+        self.find_btn = icon_button('search', 'Find in document (Ctrl+F)', checkable=True)
+        self.find_btn.clicked.connect(lambda: self._hide_search_bar() if self.search_row.isVisible() else self._show_search_bar())
         self.page_jump_spin.setKeyboardTracking(False)
         self.page_jump_spin.valueChanged.connect(lambda value: self._set_page(value - 1))
         for control in [self.left_toggle_btn, self.page_jump_spin, self.page_label,
-                        self.zoom_combo, fit_width_btn, find_btn, self.right_toggle_btn]:
+                        self.zoom_combo, self.fit_width_btn, self.fit_page_btn,
+                        self.actual_size_btn, self.find_btn, self.theme_button]:
             toolbar.addWidget(control)
         toolbar.addStretch(1)
-        for control in [self.left_toggle_btn, fit_width_btn, find_btn, self.right_toggle_btn]:
-            control.setMinimumWidth(control.minimumSizeHint().width())
-        # Secondary reader choices remain available through View.
-        options_menu = self.view_menu.addMenu('Reader mode')
-        for name in ['Single', 'Continuous']:
-            action = options_menu.addAction(name)
-            action.triggered.connect(lambda checked=False, value=name: self.view_mode_combo.setCurrentText(value))
-        text_menu = self.view_menu.addMenu('Text')
-        for name in ['View', 'Select Text', 'Convert2Text']:
-            action = text_menu.addAction(name)
-            action.triggered.connect(lambda checked=False, value=name: self.text_tool_combo.setCurrentText(value))
-        self.toolbar_row = FlexibleWidthRow()
-        self.toolbar_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.toolbar_row.setLayout(toolbar)
+        toolbar.setSpacing(4)
+        primary_controls = QWidget()
+        primary_controls.setLayout(toolbar)
+        mode_layout = QHBoxLayout()
+        mode_layout.setContentsMargins(0, 0, 0, 0)
+        mode_layout.setSpacing(4)
+        reader_label = QLabel('Reader')
+        reader_label.setBuddy(self.view_mode_combo)
+        text_label = QLabel('Text')
+        text_label.setBuddy(self.text_tool_combo)
+        self.view_mode_combo.setAccessibleName('Reader mode')
+        self.text_tool_combo.setAccessibleName('Text mode')
+        self.text_tool_combo.setToolTip('View original pages, select text on pages, or read extracted text from the whole document.')
+        for control in [reader_label, self.view_mode_combo, text_label, self.text_tool_combo]:
+            mode_layout.addWidget(control)
+        mode_layout.addStretch(1)
+        mode_layout.addWidget(self.right_toggle_btn)
+        secondary_controls = QWidget()
+        secondary_controls.setLayout(mode_layout)
+        self.toolbar_row = ResponsiveReaderToolbar(primary_controls, secondary_controls, self.page_label)
         layout.addWidget(self.toolbar_row, 0)
 
         self.search_row = FlexibleWidthRow()
@@ -803,7 +687,7 @@ class PdfUltimateMainWindow(QMainWindow):
         search_next_btn = QPushButton("Next")
         search_next_btn.clicked.connect(self._search_next)
         self.search_result_label = QLabel("0 / 0")
-        self.search_result_label.setStyleSheet("color:#195b38;font-weight:600;")
+        self.search_result_label.setStyleSheet('font-weight:600;')
         close_search_btn = QPushButton("Close")
         close_search_btn.clicked.connect(self._hide_search_bar)
         search_layout.addWidget(self.search_input, 1)
@@ -838,9 +722,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.page_scroll = QScrollArea()
         self.page_scroll.setWidgetResizable(False)
         self.page_scroll.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
-        self.page_scroll.setStyleSheet(
-            "QScrollArea{background:#e9eeeb;border:1px solid #d1dcd5;border-radius:4px;}"
-        )
+        self.page_scroll.setStyleSheet('QScrollArea{border:none;}')
         self.page_scroll.viewport().installEventFilter(self)
         self.page_scroll.verticalScrollBar().valueChanged.connect(self._on_view_scroll)
 
@@ -853,7 +735,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.page_text_view.setReadOnly(True)
         self.page_text_view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.page_text_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.page_text_view.setStyleSheet("background:#ffffff;border:1px solid #d1dcd5;border-radius:8px;")
+        self.page_text_view.setStyleSheet('border:none;')
         self.page_stack.addWidget(self.page_image)
         self.page_stack.addWidget(self.page_text_view)
         self.page_stack.setCurrentWidget(self.page_image)
@@ -862,6 +744,7 @@ class PdfUltimateMainWindow(QMainWindow):
             self._get_or_request_page_image,
             highlight_provider=self._search_highlights_for_page,
             active_highlight_provider=self._active_search_hit,
+            word_provider=self._selection_words_for_page,
         )
         self.page_scroll.setWidget(self.page_stack)
         self.body_split.addWidget(self.page_scroll)
@@ -889,7 +772,7 @@ class PdfUltimateMainWindow(QMainWindow):
         tools_title.setStyleSheet("font-size:14pt;")
         layout.addWidget(tools_title)
 
-        self.tools_combo = QComboBox()
+        self.tools_combo = VisibleComboBox()
         self.tools_combo.addItems(["Organize", "Convert", "OCR", "Security", "Enhance"])
         self.tools_combo.currentIndexChanged.connect(self._on_tool_mode_changed)
         layout.addWidget(self.tools_combo)
@@ -922,7 +805,7 @@ class PdfUltimateMainWindow(QMainWindow):
         if mode == "select":
             return "Select Text"
         if mode == "convert":
-            return "Convert2Text"
+            return "Extracted Text"
         return "View"
 
     @staticmethod
@@ -930,7 +813,7 @@ class PdfUltimateMainWindow(QMainWindow):
         lowered = value.strip().lower()
         if lowered.startswith("select"):
             return "select"
-        if lowered.startswith("convert"):
+        if lowered.startswith(("convert", "extract")):
             return "convert"
         return "view"
 
@@ -946,17 +829,21 @@ class PdfUltimateMainWindow(QMainWindow):
     def _text_select_active(self) -> bool:
         return self.text_tool_mode == "select"
 
+    def _selection_words_for_page(self, index: int) -> list[tuple]:
+        if self.current_doc is None:
+            return []
+        page = self.current_doc[index]
+        words = page.get_text('words')
+        if not page.rotation:
+            return words
+        matrix = page.rotation_matrix
+        return [(*tuple(fitz.Rect(word[:4]) * matrix), *word[4:]) for word in words]
+
     def _convert_text_active(self) -> bool:
         return self.text_tool_mode == "convert"
 
     def _set_text_tool_mode(self, mode: str) -> None:
         normalized = self._normalize_text_tool_mode(mode)
-        if normalized in {"select", "convert"} and self.view_mode == "continuous":
-            self.view_mode_combo.blockSignals(True)
-            self.view_mode_combo.setCurrentText("Single")
-            self.view_mode_combo.blockSignals(False)
-            self.view_mode = "single"
-
         if normalized == self.text_tool_mode and self.text_tool_combo.currentText() == self._text_tool_label(normalized):
             if self.current_doc is not None and self.view_mode == "single":
                 self._set_page(self.current_page_index, record_history=False)
@@ -964,6 +851,9 @@ class PdfUltimateMainWindow(QMainWindow):
 
         self.text_tool_mode = normalized
         self.page_image.set_selection_mode(self._text_select_active())
+        self.continuous_view.set_selection_mode(self._text_select_active())
+        self.view_mode_combo.setEnabled(not self._convert_text_active())
+        self.view_mode_combo.setToolTip('Page layout is retained while reading extracted text. Return to View or Select Text to change it.' if self._convert_text_active() else 'Display one PDF page or scroll continuously through pages.')
         self.text_tool_combo.blockSignals(True)
         self.text_tool_combo.setCurrentText(self._text_tool_label(self.text_tool_mode))
         self.text_tool_combo.blockSignals(False)
@@ -974,6 +864,8 @@ class PdfUltimateMainWindow(QMainWindow):
         self._update_search_result_label()
         if self.current_doc is not None:
             self._refresh_view()
+            if self.search_input.text().strip():
+                self._execute_search()
 
     def _setup_reader_shortcuts(self) -> None:
         bindings = [
@@ -1268,7 +1160,7 @@ class PdfUltimateMainWindow(QMainWindow):
         rotate_row = QHBoxLayout()
         self.rotate_selection_input = QLineEdit("1-")
         self.rotate_selection_input.setPlaceholderText("Pages to rotate")
-        self.rotate_degrees = QComboBox()
+        self.rotate_degrees = VisibleComboBox()
         self.rotate_degrees.addItems(["90", "180", "270"])
         rotate_row.addWidget(self.rotate_selection_input)
         rotate_row.addWidget(self.rotate_degrees)
@@ -1304,7 +1196,7 @@ class PdfUltimateMainWindow(QMainWindow):
         layout = QVBoxLayout(tab)
         layout.setSpacing(8)
 
-        self.convert_target = QComboBox()
+        self.convert_target = VisibleComboBox()
         for target in ["docx", "txt", "md", "html", "json", "rtf", "png", "jpg"]:
             label = target.upper() + (" (text only)" if target in {"docx", "md", "html", "rtf"} else "")
             self.convert_target.addItem(label, target)
@@ -1450,7 +1342,7 @@ class PdfUltimateMainWindow(QMainWindow):
 
         layout.addWidget(QLabel("Source / PDF Mode"))
         source_row = QVBoxLayout()
-        self.ocr_source_combo = QComboBox()
+        self.ocr_source_combo = VisibleComboBox()
         self.ocr_source_combo.addItem("Current PDF", "current_pdf")
         self.ocr_source_combo.addItem("Folder Auto", "auto_folder")
         self.ocr_source_combo.addItem("Folder Single PDF", "pdf_folder")
@@ -1459,7 +1351,7 @@ class PdfUltimateMainWindow(QMainWindow):
         stored_source_mode = str(self.state_store.get_ui("ocr_source_mode", "current_pdf"))
         source_index = self.ocr_source_combo.findData(stored_source_mode)
         self.ocr_source_combo.setCurrentIndex(source_index if source_index >= 0 else 0)
-        self.ocr_pdf_mode_combo = QComboBox()
+        self.ocr_pdf_mode_combo = VisibleComboBox()
         self.ocr_pdf_mode_combo.addItems(["pages", "direct"])
         self.ocr_pdf_mode_combo.setCurrentText(str(self.state_store.get_ui("ocr_pdf_mode", "pages")))
         source_row.addWidget(self.ocr_source_combo, 2)
@@ -1494,13 +1386,13 @@ class PdfUltimateMainWindow(QMainWindow):
 
         layout.addWidget(QLabel("Task / Output format"))
         task_row = QVBoxLayout()
-        self.ocr_task_combo = QComboBox()
+        self.ocr_task_combo = VisibleComboBox()
         self.ocr_task_combo.addItems(["text", "table", "formula", "extract", "custom"])
         self.ocr_task_combo.setCurrentText(str(self.state_store.get_ui("ocr_task", "text")))
-        self.ocr_format_combo = QComboBox()
+        self.ocr_format_combo = VisibleComboBox()
         self.ocr_format_combo.addItems(["md", "txt", "json", "html"])
         self.ocr_format_combo.setCurrentText(str(self.state_store.get_ui("ocr_format", "md")))
-        self.ocr_use_fast_combo = QComboBox()
+        self.ocr_use_fast_combo = VisibleComboBox()
         self.ocr_use_fast_combo.addItems(["auto", "true", "false"])
         stored_use_fast = str(self.state_store.get_ui("ocr_use_fast", "true")).strip().lower()
         if stored_use_fast not in {"true", "false"}:
@@ -2096,7 +1988,7 @@ class PdfUltimateMainWindow(QMainWindow):
         annotate_row = QHBoxLayout()
         self.annotate_pages_input = QLineEdit("1-")
         self.annotate_pages_input.setPlaceholderText("Pages")
-        self.annotate_style = QComboBox()
+        self.annotate_style = VisibleComboBox()
         self.annotate_style.addItems(["Highlight", "Underline", "Strikeout"])
         annotate_row.addWidget(self.annotate_pages_input)
         annotate_row.addWidget(self.annotate_style)
@@ -2130,7 +2022,7 @@ class PdfUltimateMainWindow(QMainWindow):
         stamp_opts_row = QHBoxLayout()
         self.stamp_pages_input = QLineEdit("1-")
         self.stamp_pages_input.setPlaceholderText("Pages")
-        self.stamp_anchor = QComboBox()
+        self.stamp_anchor = VisibleComboBox()
         self.stamp_anchor.addItems(["Bottom Right", "Bottom Left", "Top Right", "Top Left", "Center"])
         self.stamp_scale = QDoubleSpinBox()
         self.stamp_scale.setRange(0.05, 0.9)
@@ -2692,16 +2584,12 @@ class PdfUltimateMainWindow(QMainWindow):
 
         restored = self.state_store.get_document(self.current_pdf)
         if restored is None:
-            self._set_view_mode_silent(self.view_mode)
-            if self.view_mode == "continuous" and self.text_tool_mode != "view":
-                self._set_text_tool_mode("view")
+            self._set_view_mode_silent('continuous')
             self._fit_width()
             self._history_reset(self.current_page_index)
             return
 
         self._set_view_mode_silent(restored.view_mode)
-        if self.view_mode == "continuous" and self.text_tool_mode != "view":
-            self._set_text_tool_mode("view")
         self.current_page_index = max(0, min(total - 1, restored.page))
 
         if restored.fit_mode == "page":
@@ -2769,10 +2657,6 @@ class PdfUltimateMainWindow(QMainWindow):
         if mode == self.view_mode:
             return
         self.view_mode = mode
-        self.state_store.set_ui("default_view_mode", self.view_mode)
-        if self.view_mode == "continuous" and self.text_tool_mode != "view":
-            self._set_text_tool_mode("view")
-            return
         self._refresh_view()
         self._schedule_state_save()
 
@@ -3009,17 +2893,17 @@ class PdfUltimateMainWindow(QMainWindow):
         if not self._convert_text_active():
             return
         self._ensure_converted_text_loaded()
-        text = self.page_text_view.toPlainText()
-        lowered = text.lower()
-        needle = query.lower()
+        if self._converted_text_doc_token != self._active_doc_token():
+            self.search_result_label.setText('Extracting text...')
+            return
         spans: list[tuple[int, int]] = []
         start = 0
         while True:
-            idx = lowered.find(needle, start)
-            if idx < 0:
+            cursor = self.page_text_view.document().find(query, start)
+            if cursor.isNull():
                 break
-            spans.append((idx, idx + len(needle)))
-            start = idx + max(1, len(needle))
+            spans.append((cursor.selectionStart(), cursor.selectionEnd()))
+            start = cursor.selectionEnd()
         self._text_search_spans = spans
         if not spans:
             self._text_search_cursor = -1
@@ -3082,11 +2966,13 @@ class PdfUltimateMainWindow(QMainWindow):
 
     def _show_search_bar(self) -> None:
         self.search_row.setVisible(True)
+        self.find_btn.setChecked(True)
         self.search_input.setFocus(Qt.ShortcutFocusReason)
         self.search_input.selectAll()
 
     def _hide_search_bar(self) -> None:
         self.search_row.setVisible(False)
+        self.find_btn.setChecked(False)
         self._search_timer.stop()
         self.search_input.blockSignals(True)
         self.search_input.clear()
@@ -3214,6 +3100,8 @@ class PdfUltimateMainWindow(QMainWindow):
 
         self.search_hits = dict(result.hits)
         self.search_sequence = list(result.sequence)
+        if self._convert_text_active():
+            return
 
         if not self.search_sequence:
             self.search_cursor = -1
@@ -3354,6 +3242,16 @@ class PdfUltimateMainWindow(QMainWindow):
     def _refresh_view(self) -> None:
         if self.current_doc is None:
             return
+        if self._convert_text_active():
+            self._set_scroll_content_widget(self.page_stack)
+            self.page_stack.setCurrentWidget(self.page_text_view)
+            self._set_display_size(max(120, self.page_scroll.viewport().width() - 4), max(120, self.page_scroll.viewport().height() - 4))
+            self._ensure_converted_text_loaded()
+            total = len(self.page_order) if self.page_order else self.current_doc.page_count
+            self.page_label.setText(f'Page {self.current_page_index + 1} / {total}')
+            self._sync_page_jump_controls()
+            self._update_zoom_label()
+            return
         signature = (self._active_doc_token(), round(self.zoom_factor, 3))
         if getattr(self, "_render_signature", None) != signature:
             self.renderer.invalidate()
@@ -3399,7 +3297,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self._prefetch_neighbor_pages(self.current_page_index, span=2)
 
     def _on_view_scroll(self, value: int) -> None:
-        if self.view_mode != "continuous" or self.current_doc is None:
+        if self.view_mode != "continuous" or self.current_doc is None or self._convert_text_active():
             return
         if self.continuous_view.page_count() == 0:
             return
@@ -3429,7 +3327,7 @@ class PdfUltimateMainWindow(QMainWindow):
         if record_history:
             self._history_push(index)
         self.current_page_index = index
-        if self.view_mode == "continuous":
+        if self.view_mode == "continuous" and not self._convert_text_active():
             self.page_label.setText(f"Page {index + 1} / {total}")
             self._sync_page_jump_controls()
             self._sync_outline_selection()
@@ -3465,7 +3363,7 @@ class PdfUltimateMainWindow(QMainWindow):
             self.page_stack.setCurrentWidget(self.page_image)
             self.page_image.set_selection_mode(self._text_select_active())
             if self._text_select_active():
-                words = page.get_text("words")
+                words = self._selection_words_for_page(actual_idx)
                 self.page_image.set_page_words(words, self.zoom_factor)
             else:
                 self.page_image.set_page_words([], self.zoom_factor)
@@ -3565,7 +3463,8 @@ class PdfUltimateMainWindow(QMainWindow):
         if not self.current_doc:
             return
         self.fit_mode = "page"
-        viewport_width = max(120, self.page_scroll.viewport().width() - 34)
+        padding = self.continuous_view._margin * 2 + 4 if self.view_mode == 'continuous' else 12
+        viewport_width = max(120, self.page_scroll.viewport().width() - padding)
         viewport_height = max(120, self.page_scroll.viewport().height() - 28)
         actual_idx = self.page_order[self.current_page_index] if self.page_order else self.current_page_index
         page = self.current_doc.load_page(actual_idx)
@@ -3578,7 +3477,8 @@ class PdfUltimateMainWindow(QMainWindow):
         if not self.current_doc:
             return
         self.fit_mode = "width"
-        viewport_width = max(120, self.page_scroll.viewport().width() - 34)
+        padding = self.continuous_view._margin * 2 + 4 if self.view_mode == 'continuous' else 12
+        viewport_width = max(120, self.page_scroll.viewport().width() - padding)
         actual_idx = self.page_order[self.current_page_index] if self.page_order else self.current_page_index
         page = self.current_doc.load_page(actual_idx)
         rect = page.rect
@@ -3623,6 +3523,9 @@ class PdfUltimateMainWindow(QMainWindow):
             self.main_splitter.setSizes(sizes)
         else:
             restored = max(180, min(260, self._last_left_size))
+            if sum(sizes) - restored - sizes[2] < self._minimum_reader_width():
+                sizes[1] += sizes[2]
+                sizes[2] = 0
             sizes[0] = restored
             sizes[1] = max(100, sizes[1] - restored)
             self.main_splitter.setSizes(sizes)
@@ -3639,6 +3542,9 @@ class PdfUltimateMainWindow(QMainWindow):
             self.main_splitter.setSizes(sizes)
         else:
             restored = max(300, self._last_right_size)
+            if sum(sizes) - restored - sizes[0] < self._minimum_reader_width():
+                sizes[1] += sizes[0]
+                sizes[0] = 0
             sizes[2] = restored
             sizes[1] = max(100, sizes[1] - restored)
             self.main_splitter.setSizes(sizes)
@@ -3670,14 +3576,40 @@ class PdfUltimateMainWindow(QMainWindow):
 
     def _sync_panel_toggle_labels(self) -> None:
         sizes = self.main_splitter.sizes()
-        self.left_toggle_btn.setText("Navigation")
-        self.right_toggle_btn.setText("Tools")
+        for button, name, opened in [(self.left_toggle_btn, 'navigation', sizes[0] > 12), (self.right_toggle_btn, 'tools', sizes[2] > 12)]:
+            button.setChecked(opened)
+            button.setIcon(reader_icon(name + ('-open' if opened else '')))
+            contents = 'pages, outline and merge' if name == 'navigation' else 'organize, convert and OCR'
+            label = f"{'Hide' if opened else 'Show'} {name} pane — {contents}"
+            button.setToolTip(label)
+            button.setAccessibleName(label)
 
     def _sync_thumbnail_toggle_label(self) -> None:
         sizes = self.body_split.sizes()
         self.thumb_toggle_btn.setText("Show Thumbs" if sizes[0] <= 12 else "Hide Thumbs")
 
+    def _minimum_reader_width(self) -> int:
+        # The compact toolbar hides only the redundant page label. Reserve
+        # enough width for the mode selectors rather than squeezing them.
+        return self.toolbar_row._groups[1].layout().minimumSize().width() + 22
+
     def _on_layout_changed(self, *_args) -> None:
+        sizes = self.main_splitter.sizes()
+        reader_minimum = self._minimum_reader_width()
+        if sizes[1] < reader_minimum and sizes[0] > 12 and sizes[2] > 12:
+            self._last_left_size = sizes[0]
+            sizes[1] += sizes[0]
+            sizes[0] = 0
+        if sizes[1] < reader_minimum:
+            for index, minimum in ((2, 300), (0, 180)):
+                if sizes[index] <= 12:
+                    continue
+                maximum = sum(sizes) - reader_minimum
+                remaining = max(0, maximum) if maximum >= minimum else 0
+                sizes[1] += sizes[index] - remaining
+                sizes[index] = remaining
+        if sizes != self.main_splitter.sizes():
+            self.main_splitter.setSizes(sizes)
         self._sync_panel_toggle_labels()
         self._sync_thumbnail_toggle_label()
         self._layout_state_timer.start(700)
@@ -3800,6 +3732,9 @@ class PdfUltimateMainWindow(QMainWindow):
     def _apply_fit_after_layout_change(self) -> None:
         if self.current_doc is None:
             return
+        if self._convert_text_active():
+            self._refresh_view()
+            return
         if self.fit_mode == "width":
             self._fit_width()
             return
@@ -3904,6 +3839,16 @@ class PdfUltimateMainWindow(QMainWindow):
         return value / 100.0
 
     def _on_zoom_combo_changed(self, *_args) -> None:
+        choice = self.zoom_combo.currentText().lower()
+        if choice.startswith('fit width'):
+            self._fit_width()
+            return
+        if choice.startswith('fit page'):
+            self._fit_page()
+            return
+        if choice.startswith('actual size'):
+            self._actual_size()
+            return
         zoom = self._parse_zoom_text(self.zoom_combo.currentText())
         if zoom is None:
             self._update_zoom_label()
@@ -3920,7 +3865,19 @@ class PdfUltimateMainWindow(QMainWindow):
         if not hasattr(self, "zoom_combo"):
             return
         label = f"{int(round(self.zoom_factor * 100))}%"
+        index = self.zoom_combo.findText(label)
+        if self.fit_mode == 'width':
+            index = 0
+        elif self.fit_mode == 'page':
+            index = 1
+        elif abs(self.zoom_factor - 1) < 0.0001:
+            index = 2
+        self.fit_width_btn.setChecked(self.fit_mode == 'width')
+        self.fit_page_btn.setChecked(self.fit_mode == 'page')
+        self.actual_size_btn.setChecked(self.fit_mode == 'manual' and abs(self.zoom_factor - 1) < 0.0001)
+        self.zoom_combo.setToolTip(f"{'Fit Width' if self.fit_mode == 'width' else 'Fit Page' if self.fit_mode == 'page' else 'Zoom'}: {label}. Choose a preset or enter a percentage.")
         self.zoom_combo.blockSignals(True)
+        self.zoom_combo.setCurrentIndex(index)
         self.zoom_combo.setEditText(label)
         self.zoom_combo.blockSignals(False)
 

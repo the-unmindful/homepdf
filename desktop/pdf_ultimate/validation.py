@@ -90,6 +90,22 @@ def run_smoke(source: Path, destination: Path) -> int:
                 assert report.get("cancelled")
                 assert not (destination / "cancelled-export").exists()
                 assert not list((destination / "state" / "temp").glob("job-*"))
+                report["reader_combinations"] = []
+                for layout in ("Single", "Continuous"):
+                    window.view_mode_combo.setCurrentText(layout)
+                    for mode in ("view", "select", "convert"):
+                        window._set_text_tool_mode(mode)
+                        assert window.view_mode == layout.lower()
+                        assert window.view_mode_combo.isEnabled() == (mode != "convert")
+                        report["reader_combinations"].append([layout, mode])
+                window._set_theme_mode("dark")
+                state["phase"] = "extracted"
+            elif phase == "extracted" and not window.text_jobs.busy:
+                assert "needle" in window.page_text_view.toPlainText().lower()
+                window._execute_search()
+                assert window._text_search_spans
+                window.grab().save(str(destination / "extracted-dark.png"))
+                report["extracted_search_hits"] = len(window._text_search_spans)
                 report["passed"] = True
                 finish(0)
         except Exception as exc:

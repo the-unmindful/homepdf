@@ -1,6 +1,6 @@
 # Reader quality validation
 
-The bounded plan is complete on `codex/performance-ux`, starting from `c2a0d5a`. The local portable candidate was built from `ff02cf0`; no release was published. All existing reading/tool workflows remain local. No feature expansion or framework replacement was introduced.
+The bounded plan is complete on `codex/performance-ux`, starting from `c2a0d5a`. The initial portable candidate was built from `ff02cf0`; the current ribbon/mode/theme and Windows registration follow-up is recorded below. No release was published. All existing reading/tool workflows remain local. No framework replacement was introduced.
 
 ## Highest-value results
 
@@ -63,3 +63,15 @@ Local candidate: `release/PDFUltimate-portable/PDFUltimate.exe`; archive: `relea
 ## Practical limits
 
 Physical multi-monitor DPI transitions, screen-reader behavior and actual GLM-OCR model/GPU inference still need device-level checks. Offscreen tests verify layout and process behavior, not those hardware experiences. OCR remains an external runtime and may leave partial OCR output after cancellation. The work does not establish a competitive claim that HomePDF is the best reader; it makes the existing app substantially faster, more reliable and easier to use.
+
+## Ribbon, modes, themes and Windows launch follow-up
+
+- Reader and Text remain visible before Tools. Fresh documents default to Continuous; document-specific saved layout still restores. Single/Continuous both support View and Select Text. Extracted Text displays whole-document text, disables the irrelevant layout selector and preserves the layout for returning to pages.
+- Search works through all six layout/text choices, including mode changes during extraction and Unicode cursor positions. Selection supports rotated pages and Continuous without extracting every page; releasing a drag removes its rectangle while keeping selected words and clipboard copying.
+- Icon controls expose navigation, fit width/page, actual size, search, theme and tools. Navigation uses a page list and Tools a wrench; chevrons, checked state and descriptive hover text expose pane contents and direction. Visible dropdown chevrons apply to all selectors. Zoom presets synchronize the active choice with fit/actual-size actions.
+- The ribbon uses one row when it fits, otherwise two aligned rows. Both panes at 1366 px leave more than 650 px of document viewport. Manual opening and dragging at 760/1000 px reserve readable controls, collapsing the opposite pane where needed. The redundant long page label yields space in a narrow reader; the page spinner remains available.
+- System/Light/Dark applies to existing widgets and icons and persists. Dark chrome retains white PDF pages. Identical palette/stylesheet application is skipped. No new runtime dependencies.
+- 81 source regressions pass. Packaged smoke checks pass at 100% and 150% scaling: rendering, bounded queue, 30 search matches, 30-file export, cancellation cleanup, six mode attachments and extracted-text search. Synthetic first render measured 156/172 ms; these are fixture timings, not universal startup claims. ZIP CRC, executable, helper and packaged icon pass verification.
+- Windows Shell enumeration reproduced two recommended HomePDF entries and three total: legacy portable and missing Local\\Programs registrations. Repair leaves one recommended and one total handler. AssocQueryString, Get-StartApps and actual PDF launch all point to `release/PDFUltimate-portable/PDFUltimate.exe` in this worktree. The obsolete running reader closed normally and the same Downloads PDF reopened through Windows' PDF default. Protected UserChoice/UserChoiceLatest values/hashes remained unchanged. No app installation was performed.
+
+Current portable executable SHA-256: `E3DA336E642B5859C8DC8899CB514A0C7977A71E47AB6C3F045A4DABD402D402`. The current ZIP is 75,229,903 bytes. The source plan is [ribbon/modes/themes](superpowers/plans/2026-10-02-ribbon-modes-themes.md); reports and Windows registration backups are under ignored `runtime_data`.

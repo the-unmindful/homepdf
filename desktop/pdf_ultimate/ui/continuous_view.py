@@ -4,11 +4,12 @@ from collections.abc import Callable
 from bisect import bisect_right
 
 from PySide6.QtCore import QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent
+from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent, QPalette
 from PySide6.QtWidgets import QWidget
+from .selectable_page import SelectablePageLabel
 
 
-class ContinuousPageView(QWidget):
+class ContinuousPageView(SelectablePageLabel):
     pageActivated = Signal(int)
 
     def __init__(
@@ -17,11 +18,14 @@ class ContinuousPageView(QWidget):
         highlight_provider: Callable[[int], list[tuple[float, float, float, float]]] | None = None,
         active_highlight_provider: Callable[[], tuple[int, int] | None] | None = None,
         parent: QWidget | None = None,
+        word_provider: Callable[[int], list[tuple]] | None = None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(parent=parent)
         self._image_provider = image_provider
         self._highlight_provider = highlight_provider
         self._active_highlight_provider = active_highlight_provider
+        self._word_provider = word_provider
+        self._selection_row = -1
         self._page_indices: list[int] = []
         self._page_rects: list[QRect] = []
         self._tops = []
@@ -32,6 +36,8 @@ class ContinuousPageView(QWidget):
         self.setMinimumSize(220, 220)
 
     def configure(self, page_indices: list[int], page_sizes: list[QSize], zoom: float) -> None:
+        self.clear_selection()
+        self._selection_row = -1
         self._page_indices = list(page_indices)
         self._zoom = float(zoom)
         self._page_rects.clear()
@@ -57,6 +63,25 @@ class ContinuousPageView(QWidget):
         self.setFixedSize(self._canvas_size)
         self.update()
 
+    def _pixmap_rect(self) -> QRect:
+        if 0 <= self._selection_row < len(self._page_rects):
+            return self._page_rects[self._selection_row]
+        return QRect()
+
+    def mousePressEvent(self, event) -> None:
+        if self._selection_enabled and event.button() == Qt.LeftButton:
+            point = event.position().toPoint()
+            row = self.page_at_offset(point.y())
+            if self._page_rects and self._page_rects[row].contains(point):
+                self._selection_row = row
+                page = self._page_indices[row]
+                self.set_page_words(self._word_provider(page) if self._word_provider else [], self._zoom)
+                self.pageActivated.emit(row)
+            else:
+                self._selection_row = -1
+                self.clear_selection()
+        super().mousePressEvent(event)
+
     def page_count(self) -> int:
         return len(self._page_indices)
 
@@ -79,7 +104,7 @@ class ContinuousPageView(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        painter.fillRect(event.rect(), QColor("#e9eeeb"))
+        painter.fillRect(event.rect(), self.palette().color(QPalette.Window))
 
         if not self._page_rects:
             painter.end()
@@ -94,7 +119,7 @@ class ContinuousPageView(QWidget):
             if not rect.intersects(visible):
                 continue
             page_index = self._page_indices[row]
-            painter.fillRect(rect.adjusted(-2, -2, 2, 2), QColor("#d1dcd5"))
+            painter.fillRect(rect.adjusted(-2, -2, 2, 2), self.palette().color(QPalette.Mid))
             painter.fillRect(rect, QColor("#ffffff"))
 
             image = self._image_provider(page_index, self._zoom)
@@ -125,4 +150,6 @@ class ContinuousPageView(QWidget):
                 painter.setPen(QColor("#5f6b7f"))
                 painter.drawText(rect, Qt.AlignCenter, "Rendering...")
 
+        if self._selection_row >= 0:
+            self.paint_selection(painter, self._pixmap_rect())
         painter.end()
