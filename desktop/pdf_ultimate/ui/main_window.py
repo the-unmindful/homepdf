@@ -281,6 +281,14 @@ class PdfUltimateMainWindow(QMainWindow):
         self._build_menu()
         self._build_ui()
         self._sync_empty_state()
+        # Reload the open document when another program rewrites it (exports, LaTeX, ...).
+        from PySide6.QtCore import QFileSystemWatcher
+        self._file_watcher = QFileSystemWatcher(self)
+        self._file_watcher.fileChanged.connect(lambda _path: self._reload_timer.start(600))
+        self._reload_timer = QTimer(self)
+        self._reload_timer.setSingleShot(True)
+        self._reload_timer.timeout.connect(self._reload_if_changed)
+        self._watched_signature = None
         self._setup_reader_shortcuts()
         self._update_operation_history_actions()
         app = QApplication.instance()
@@ -355,6 +363,11 @@ class PdfUltimateMainWindow(QMainWindow):
         save_copy_action = QAction("Extract Pages As...", self)
         save_copy_action.triggered.connect(self._extract_pages_from_ui)
         file_menu.addAction(save_copy_action)
+
+        print_action = QAction("Print...", self)
+        print_action.setShortcut("Ctrl+P")
+        print_action.triggered.connect(self._print_document)
+        file_menu.addAction(print_action)
 
         properties_action = QAction("Properties", self)
         properties_action.setShortcut("Ctrl+D")
@@ -2396,6 +2409,19 @@ class PdfUltimateMainWindow(QMainWindow):
         if paths:
             self.open_documents([Path(path) for path in paths])
 
+    @staticmethod
+    def _open_unlocked(path: Path) -> fitz.Document:
+        """Open from memory so Windows does not lock the file while it is displayed;
+        other programs can overwrite it and the watcher reloads it. Very large files
+        fall back to opening by path."""
+        if path.stat().st_size <= 256 * 1024 * 1024:
+            data = path.read_bytes()
+            try:
+                return fitz.open(stream=data, filetype="pdf")
+            except Exception:
+                pass
+        return fitz.open(str(path))
+
     def _open_pdf(self, pdf_path: Path, *, record_doc_history: bool = True) -> bool:
         try:
             self._save_current_document_state()
@@ -2403,7 +2429,7 @@ class PdfUltimateMainWindow(QMainWindow):
                 self.current_doc.close()
                 self.current_doc = None
             self.current_pdf = pdf_path.resolve()
-            self.current_doc = fitz.open(str(self.current_pdf))
+            self.current_doc = self._open_unlocked(self.current_pdf)
             if self.current_doc.needs_pass:
                 self.current_doc.close()
                 self.current_doc = None
@@ -2456,7 +2482,7 @@ class PdfUltimateMainWindow(QMainWindow):
                 self._push_operation_document(self.current_pdf)
             self._sync_active_tab_with_current_pdf()
             self._add_recent_file(self.current_pdf)
-            self.statusBar().showMessage(f"Loaded {self.current_pdf.name}")
+            self.statusBar().showMessage(f"Loaded {self.current_pdf.name}", 3000)
             return True
         except Exception as exc:
             if self.current_doc is not None:
@@ -3313,12 +3339,117 @@ class PdfUltimateMainWindow(QMainWindow):
                 QTimer.singleShot(0, self._apply_fit_after_layout_change)
         if hasattr(self, "toolbar_row"):
             self.toolbar_row.setEnabled(has_document)
+        watched = getattr(self, "_watched_signature", None)
+        if (watched[0] if watched else None) != (str(self.current_pdf) if self.current_pdf else None):
+            self._watch_current_file()
         if not has_document:
             self.search_row.setVisible(False)
             self.empty_state.set_recent(self._read_recent_file_paths())
             self.setWindowTitle("HOME PDF")
         else:
             self.setWindowTitle(f"{self.current_pdf.name} \u2013 HOME PDF")
+
+    def _watch_current_file(self) -> None:
+        watcher = getattr(self, "_file_watcher", None)
+        if watcher is None:
+            return
+        if watcher.files():
+            watcher.removePaths(watcher.files())
+        self._watched_signature = None
+        if self.current_pdf is not None and self.current_pdf.exists():
+            watcher.addPath(str(self.current_pdf))
+            stat = self.current_pdf.stat()
+            self._watched_signature = (str(self.current_pdf), stat.st_mtime_ns, stat.st_size)
+
+    def _reload_if_changed(self) -> None:
+        if self.current_pdf is None or not self.current_pdf.exists():
+            return
+        stat = self.current_pdf.stat()
+        signature = (str(self.current_pdf), stat.st_mtime_ns, stat.st_size)
+        if signature == self._watched_signature:
+            self._watch_current_file()
+            return
+        try:
+            with fitz.open(str(self.current_pdf)) as probe:
+                if probe.page_count <= 0:
+                    raise ValueError("empty")
+        except Exception:
+            # Still being written; try again shortly.
+            self._reload_timer.start(800)
+            return
+        self._clear_preview_cache()
+        self.renderer.invalidate()
+        self.__dict__.get("_word_cache", {}).clear()
+        if self._open_pdf(self.current_pdf, record_doc_history=False):
+            self._watch_current_file()
+            self.statusBar().showMessage("Reloaded: the file changed on disk.", 4000)
+
+    def _print_document(self) -> None:
+        if self.current_doc is None:
+            return
+        from PySide6.QtPrintSupport import QPrintDialog, QPrinter
+        from PySide6.QtWidgets import QProgressDialog
+
+        order = list(self.page_order) if self.page_order else list(range(self.current_doc.page_count))
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setDocName(self.current_pdf.name if self.current_pdf else "HOME PDF")
+        dialog = QPrintDialog(printer, self)
+        dialog.setOption(QPrintDialog.PrintPageRange, True)
+        dialog.setOption(QPrintDialog.PrintCurrentPage, True)
+        dialog.setMinMax(1, len(order))
+        dialog.setFromTo(1, len(order))
+        if dialog.exec() != QPrintDialog.Accepted:
+            return
+        if printer.printRange() == QPrinter.CurrentPage:
+            rows = [self.current_page_index]
+        elif printer.printRange() == QPrinter.PageRange:
+            rows = list(range(max(1, printer.fromPage()) - 1, min(len(order), printer.toPage())))
+        else:
+            rows = list(range(len(order)))
+        if not rows:
+            return
+        printed = self._render_to_printer(printer, [order[row] for row in rows])
+        if printed:
+            self.statusBar().showMessage(f"Sent {printed} page(s) to {printer.printerName() or 'the printer'}.", 5000)
+
+    def _render_to_printer(self, printer, pages: list[int]) -> int:
+        """Print file pages at up to 300 dpi, centred and fitted to the printable area."""
+        from PySide6.QtWidgets import QProgressDialog
+
+        rows = pages
+        progress = QProgressDialog("Printing...", "Cancel", 0, len(rows), self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(400)
+        dpi = max(150, min(300, printer.resolution()))
+        painter = QPainter()
+        if not painter.begin(printer):
+            self._show_error(PdfToolkitError("Could not start the print job."))
+            return 0
+        try:
+            for number, row in enumerate(rows):
+                if progress.wasCanceled():
+                    printer.abort()
+                    break
+                progress.setValue(number)
+                QApplication.processEvents()
+                if number:
+                    printer.newPage()
+                page = self.current_doc.load_page(row)
+                scale = bounded_scale(page.rect.width, page.rect.height, dpi / 72.0)
+                pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                image = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888)
+                target = painter.viewport()
+                fit = image.size().scaled(target.size(), Qt.KeepAspectRatio)
+                x = target.x() + (target.width() - fit.width()) // 2
+                y = target.y() + (target.height() - fit.height()) // 2
+                painter.drawImage(QRect(x, y, fit.width(), fit.height()), image)
+            else:
+                progress.setValue(len(rows))
+                return len(rows)
+            return 0
+        finally:
+            painter.end()
+            progress.close()
 
     def _show_document_properties(self) -> None:
         if self.current_pdf is None:

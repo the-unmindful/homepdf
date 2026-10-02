@@ -472,6 +472,58 @@ class ReaderTests(unittest.TestCase):
         self.window.thumbnail_list.item(4).setSelected(True)
         self.assertEqual(self.window._page_selection_text(self.window.delete_selection_input), '3,5')
 
+    def test_zoom_keeps_document_point_under_cursor(self):
+        self.open_reader()
+        self.window._set_page(3)
+        self.app.processEvents()
+        view, vbar, hbar = self.window.continuous_view, self.window.page_scroll.verticalScrollBar(), self.window.page_scroll.horizontalScrollBar()
+        pos = QPoint(200, 150)
+
+        def doc_point():
+            y = vbar.value() + pos.y()
+            row = view.page_at_offset(y)
+            rect = view._page_rects[row]
+            return row, (hbar.value() + pos.x() - rect.left()) / view._zoom, (y - rect.top()) / view._zoom
+
+        before = doc_point()
+        self.window._zoom_at(1.6, pos)
+        self.app.processEvents()
+        after = doc_point()
+        self.assertEqual(before[0], after[0])
+        self.assertAlmostEqual(before[1], after[1], delta=2)
+        self.assertAlmostEqual(before[2], after[2], delta=2)
+
+    def test_zoom_steps_land_on_standard_levels(self):
+        self.open_reader()
+        self.window._actual_size()
+        self.window._step_zoom(1)
+        self.assertAlmostEqual(self.window.zoom_factor, 1.1)
+        self.window._step_zoom(-1)
+        self.window._step_zoom(-1)
+        self.assertAlmostEqual(self.window.zoom_factor, 0.9)
+
+    def test_reload_when_file_changes_on_disk(self):
+        self.open_reader()
+        self.assertEqual(self.window.current_doc.page_count, 40)
+        doc = fitz.open()
+        for i in range(3):
+            doc.new_page().insert_text((50, 60), f'Rewritten {i}')
+        doc.save(self.source)  # the displayed file is not locked
+        doc.close()
+        self.window._reload_if_changed()
+        self.assertEqual(self.window.current_doc.page_count, 3)
+
+    def test_print_renders_requested_pages(self):
+        from PySide6.QtPrintSupport import QPrinter
+        self.open_reader()
+        out = self.root / 'printed.pdf'
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setOutputFormat(QPrinter.PdfFormat)
+        printer.setOutputFileName(str(out))
+        self.assertEqual(self.window._render_to_printer(printer, [0, 1, 5]), 3)
+        with fitz.open(out) as printed:
+            self.assertEqual(printed.page_count, 3)
+
     def test_navigation_switches_outline_and_thumbnails_in_one_pane(self):
         self.assertIs(self.window.thumbnail_list.parentWidget(), self.window.navigation_stack)
         self.assertEqual(self.window.body_split.sizes()[0], 0)

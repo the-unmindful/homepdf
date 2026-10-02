@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 
@@ -29,13 +29,10 @@ class EmptyState(QWidget):
         layout.setSpacing(10)
 
         icon = QLabel()
-        icon_path = Path(__file__).resolve().parent.parent / "resources" / "app.png"
-        pixmap = QPixmap(str(icon_path))
-        if not pixmap.isNull():
-            dpr = self.devicePixelRatioF()
-            scaled = pixmap.scaled(int(64 * dpr), int(64 * dpr), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            scaled.setDevicePixelRatio(dpr)
-            icon.setPixmap(scaled)
+        # app.ico ships in the portable build (app.png does not).
+        app_icon = QIcon(str(Path(__file__).resolve().parent.parent / "resources" / "app.ico"))
+        if not app_icon.isNull():
+            icon.setPixmap(app_icon.pixmap(QSize(64, 64), self.devicePixelRatioF()))
         icon.setAlignment(Qt.AlignHCenter)
         layout.addWidget(icon)
 
