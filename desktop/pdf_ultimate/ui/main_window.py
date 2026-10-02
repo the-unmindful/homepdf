@@ -43,9 +43,9 @@ from PySide6.QtWidgets import (
 
 from pdf_ultimate.core.paths import output_root
 from pdf_ultimate.core.pdf_tools import PdfToolkit, PdfToolkitError, ProtectOptions
-from pdf_ultimate.core.process_pool import get_process_pool
-from pdf_ultimate.core.worker_tasks import SearchResult, search_pdf_text, bounded_scale
+from pdf_ultimate.core.worker_tasks import SearchResult, bounded_scale
 from pdf_ultimate.core.render_service import PdfRenderService
+from pdf_ultimate.core.job_service import JobService
 from pdf_ultimate.core.state_store import AppStateStore, DocumentViewState
 from pdf_ultimate.ui.continuous_view import ContinuousPageView
 
@@ -404,6 +404,21 @@ class PdfUltimateMainWindow(QMainWindow):
         self.renderer.rendered.connect(self._on_render_ready)
         self.renderer.failed.connect(self._on_render_failed)
 
+        self.tool_jobs = JobService(self)
+        self.tool_jobs.finished.connect(self._tool_finished)
+        self.tool_jobs.failed.connect(self._tool_failed)
+        self.tool_jobs.cancelled.connect(self._tool_cancelled)
+        self.tool_jobs.progress.connect(self._tool_progress)
+        self.search_jobs = JobService(self)
+        self.search_jobs.finished.connect(self._search_job_finished)
+        self.search_jobs.failed.connect(self._search_job_failed)
+        self.search_jobs.cancelled.connect(self._restart_pending_search)
+        self._pending_search = None
+        self.text_jobs = JobService(self)
+        self.text_jobs.finished.connect(self._reader_text_finished)
+        self.text_jobs.failed.connect(lambda message: self.page_text_view.setPlainText(message))
+        self.text_jobs.cancelled.connect(lambda: self._ensure_converted_text_loaded() if self._convert_text_active() and not getattr(self, "_closing", False) else None)
+        self._tool_callback = None
         self._async_bridge = _AsyncBridge(self)
         self._async_bridge.searchCompleted.connect(self._on_async_search_completed)
         self._async_bridge.searchFailed.connect(self._on_async_search_failed)
@@ -437,6 +452,10 @@ class PdfUltimateMainWindow(QMainWindow):
         if app is not None:
             app.installEventFilter(self)
         self.setStatusBar(QStatusBar(self))
+        self.job_cancel_button = QPushButton("Cancel operation")
+        self.job_cancel_button.clicked.connect(self.tool_jobs.cancel)
+        self.statusBar().addPermanentWidget(self.job_cancel_button)
+        self.job_cancel_button.hide()
         self._refresh_recent_files_menu()
         self.statusBar().showMessage("Ready. Drop a PDF or click Open PDF.")
 
@@ -2481,6 +2500,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self._close_document_tab(self.document_tabs.currentIndex())
 
     def _clear_document_workspace(self) -> None:
+        self.text_jobs.cancel()
         self._save_current_document_state()
         if self.current_doc is not None:
             self.current_doc.close()
@@ -2604,6 +2624,8 @@ class PdfUltimateMainWindow(QMainWindow):
             self.statusBar().showMessage(f"Loaded {self.current_pdf.name}")
             return True
         except Exception as exc:
+            if self.current_doc is not None:
+                self.current_doc.close()
             self.current_doc = None
             self.current_pdf = None
             self._clear_document_workspace()
@@ -3031,21 +3053,23 @@ class PdfUltimateMainWindow(QMainWindow):
         if token == self._converted_text_doc_token and self._converted_text_cache:
             return
 
-        parts: list[str] = []
+        if self.text_jobs.busy:
+            if getattr(self, "_text_job_token", "") != token:
+                self.text_jobs.cancel()
+            return
+        self.page_text_view.setPlainText("Extracting text...")
+        self._text_job_token = token
         order = self.page_order if self.page_order else list(range(self.current_doc.page_count))
-        for display_idx, actual_idx in enumerate(order, start=1):
-            page = self.current_doc.load_page(actual_idx)
-            text = page.get_text("text").strip()
-            if text:
-                parts.append(f"Page {display_idx}\n{text}")
-            else:
-                parts.append(f"Page {display_idx}\n[No text detected on this page]")
-        content = "\n\n".join(parts).strip()
-        if not content:
-            content = "[No text detected in this PDF]"
-        self._converted_text_cache = content
-        self._converted_text_doc_token = token
-        self.page_text_view.setPlainText(self._converted_text_cache)
+        self.text_jobs.start("reader_text", [self.current_pdf, order])
+
+    def _reader_text_finished(self, result):
+        if self._text_job_token != self._active_doc_token():
+            return
+        self._converted_text_cache = result["value"]
+        self._converted_text_doc_token = self._text_job_token
+        self.page_text_view.setPlainText(result["value"])
+        if self.search_input.text().strip():
+            self._execute_text_search(self.search_input.text().strip())
 
     def _apply_text_search_highlights(self) -> None:
         if not self._convert_text_active():
@@ -3165,11 +3189,16 @@ class PdfUltimateMainWindow(QMainWindow):
     def _hide_search_bar(self) -> None:
         self.search_row.setVisible(False)
         self._search_timer.stop()
+        self.search_input.blockSignals(True)
         self.search_input.clear()
+        self.search_input.blockSignals(False)
+        self._cancel_async_search()
         self._clear_search()
         self._refresh_view()
 
     def _clear_search(self) -> None:
+        self._search_timer.stop()
+        self._cancel_async_search()
         self.search_hits.clear()
         self.search_sequence.clear()
         self.search_cursor = -1
@@ -3238,42 +3267,37 @@ class PdfUltimateMainWindow(QMainWindow):
         self._active_search_job_id = 0
         self._active_search_query = ""
         self._active_search_doc_token = ""
-        future = getattr(self, "_active_search_future", None)
-        if future is not None:
-            try:
-                future.cancel()
-            except Exception:
-                pass
-        self._active_search_future = None
+        self._pending_search = None
+        self.search_jobs.cancel()
 
     def _start_async_search(self, query: str) -> None:
         if self.current_doc is None or self.current_pdf is None:
             return
-        order = self.page_order if self.page_order else list(range(self.current_doc.page_count))
-
+        if self.search_jobs.busy:
+            self._pending_search = query
+            self.search_jobs.cancel()
+            return
         self._search_job_counter += 1
-        job_id = self._search_job_counter
-        doc_token = self._active_doc_token()
-
-        self._active_search_job_id = job_id
+        self._active_search_job_id = self._search_job_counter
         self._active_search_query = query
-        self._active_search_doc_token = doc_token
+        self._active_search_doc_token = self._active_doc_token()
+        self._search_context = (self._active_search_job_id, self._active_search_doc_token, query)
+        self.search_result_label.setText("Searching...")
+        self.search_jobs.start("search", [self.current_pdf, list(self.page_order), query])
 
-        if hasattr(self, "search_result_label"):
-            self.search_result_label.setText("… / …")
-        self.statusBar().showMessage("Searching…")
+    def _restart_pending_search(self):
+        query = self._pending_search
+        self._pending_search = None
+        if query and query == self.search_input.text().strip():
+            self._start_async_search(query)
 
-        future = get_process_pool().submit(search_pdf_text, str(self.current_pdf), order, query)
-        self._active_search_future = future
+    def _search_job_finished(self, payload):
+        value = payload["value"]
+        result = SearchResult({int(key): rects for key, rects in value["hits"].items()}, value["sequence"])
+        self._on_async_search_completed((*self._search_context, result))
 
-        def _done(fut) -> None:
-            try:
-                result: SearchResult = fut.result()
-                self._async_bridge.searchCompleted.emit((job_id, doc_token, query, result))
-            except Exception as exc:
-                self._async_bridge.searchFailed.emit((job_id, doc_token, query, str(exc)))
-
-        future.add_done_callback(_done)
+    def _search_job_failed(self, message):
+        self._on_async_search_failed((*self._search_context, message))
 
     def _on_async_search_completed(self, payload: object) -> None:
         try:
@@ -3900,7 +3924,12 @@ class PdfUltimateMainWindow(QMainWindow):
             self.main_splitter.setSizes(sizes)
         self._on_layout_changed()
 
-    def closeEvent(self, event) -> None:  # type: ignore[override]
+    def closeEvent(self, event) -> None:
+        self._closing = True  # type: ignore[override]
+        for service in (self.tool_jobs, self.search_jobs, self.text_jobs):
+            service.cancel()
+            if service._process is not None:
+                service._process.waitForFinished(1000)
         app = QApplication.instance()
         if app is not None:
             app.removeEventFilter(self)
@@ -3980,7 +4009,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.fit_mode = "manual"
         self.zoom_factor = max(0.2, min(6.0, zoom))
         if self.current_doc is not None:
-            self._set_page(self.current_page_index)
+            self._refresh_view()
             self._schedule_state_save()
         else:
             self._update_zoom_label()
@@ -4037,8 +4066,7 @@ class PdfUltimateMainWindow(QMainWindow):
             if len(self.merge_sources) < 2:
                 raise PdfToolkitError("Add at least two PDFs in merge queue.")
             output = self.toolkit.default_output_path(self.merge_sources[0], "merged")
-            result = self.toolkit.merge(self.merge_sources, output)
-            self._show_result([result], "Merge complete.")
+            self._submit_tool("merge", self.merge_sources, output, message="Merge complete.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4046,8 +4074,7 @@ class PdfUltimateMainWindow(QMainWindow):
         try:
             source = self._require_current_pdf()
             output = self.toolkit.default_output_path(source, "extract")
-            result = self.toolkit.extract_pages(source, self.extract_selection_input.text(), output)
-            self._show_result([result], "Pages extracted.")
+            self._submit_tool("extract_pages", source, self.extract_selection_input.text(), output, message="Pages extracted.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4055,8 +4082,7 @@ class PdfUltimateMainWindow(QMainWindow):
         try:
             source = self._require_current_pdf()
             output = self.toolkit.default_output_path(source, "deleted")
-            result = self.toolkit.delete_pages(source, self.delete_selection_input.text(), output)
-            self._show_result([result], "Pages deleted.")
+            self._submit_tool("delete_pages", source, self.delete_selection_input.text(), output, message="Pages deleted.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4064,8 +4090,7 @@ class PdfUltimateMainWindow(QMainWindow):
         try:
             source = self._require_current_pdf()
             output = self.toolkit.default_output_path(source, "reordered")
-            result = self.toolkit.reorder_pages(source, self.reorder_input.text(), output)
-            self._show_result([result], "Pages reordered.")
+            self._submit_tool("reorder_pages", source, self.reorder_input.text(), output, message="Pages reordered.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4079,8 +4104,7 @@ class PdfUltimateMainWindow(QMainWindow):
                 raise PdfToolkitError("Thumbnail order is unchanged.")
             order_text = ",".join(str(idx + 1) for idx in self.page_order)
             output = self.toolkit.default_output_path(source, "thumb_reordered")
-            result = self.toolkit.reorder_pages(source, order_text, output)
-            self._show_result([result], "Applied thumbnail drag order.")
+            self._submit_tool("reorder_pages", source, order_text, output, message="Applied thumbnail drag order.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4089,13 +4113,7 @@ class PdfUltimateMainWindow(QMainWindow):
             source = self._require_current_pdf()
             output = self.toolkit.default_output_path(source, "rotated")
             degrees = int(self.rotate_degrees.currentText())
-            result = self.toolkit.rotate_pages(
-                source,
-                self.rotate_selection_input.text(),
-                degrees,
-                output,
-            )
-            self._show_result([result], "Rotation complete.")
+            self._submit_tool("rotate_pages", source, self.rotate_selection_input.text(), degrees, output, message="Rotation complete.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4103,8 +4121,7 @@ class PdfUltimateMainWindow(QMainWindow):
         try:
             source = self._require_current_pdf()
             output_dir = output_root() / f"{source.stem}_split_ranges"
-            results = self.toolkit.split_by_ranges(source, self.split_ranges_input.text(), output_dir)
-            self._show_result(results, f"Created {len(results)} split files.")
+            self._submit_tool("split_by_ranges", source, self.split_ranges_input.text(), output_dir, message="Split complete.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4112,8 +4129,7 @@ class PdfUltimateMainWindow(QMainWindow):
         try:
             source = self._require_current_pdf()
             output_dir = output_root() / f"{source.stem}_split_every_{self.split_every_spin.value()}"
-            results = self.toolkit.split_every(source, self.split_every_spin.value(), output_dir)
-            self._show_result(results, f"Created {len(results)} split files.")
+            self._submit_tool("split_every", source, self.split_every_spin.value(), output_dir, message="Split complete.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4122,8 +4138,7 @@ class PdfUltimateMainWindow(QMainWindow):
             source = self._require_current_pdf()
             target = self.convert_target.currentText()
             output_dir = output_root() / f"{source.stem}_convert_{target}"
-            result = self.toolkit.convert(source, target, output_dir)
-            self._show_result(result.outputs, f"Converted to {target}.")
+            self._submit_tool("convert", source, target, output_dir, message=f"Converted to {target}.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4177,17 +4192,14 @@ class PdfUltimateMainWindow(QMainWindow):
             first = self.to_pdf_sources[0]
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output = output_root() / f"{first.stem}_to_pdf_{stamp}.pdf"
-            result = self.toolkit.convert_to_pdf(self.to_pdf_sources, output)
-            self._show_result([result], "Converted to PDF.")
+            self._submit_tool("convert_to_pdf", self.to_pdf_sources, output, message="Converted to PDF.")
         except Exception as exc:
             self._show_error(exc)
 
     def _reflow_text(self) -> None:
         try:
             source = self._require_current_pdf()
-            text = self.toolkit.extract_reflow_text(source)
-            self.reflow_output.setPlainText(text)
-            self.statusBar().showMessage("Reflow text extracted.")
+            self._submit_tool("extract_reflow_text", source, message="Reflow text extracted.", callback=lambda result: self.reflow_output.setPlainText(result["value"]))
         except Exception as exc:
             self._show_error(exc)
 
@@ -4213,14 +4225,7 @@ class PdfUltimateMainWindow(QMainWindow):
                 allow_modify=self.allow_modify_box.isChecked(),
                 allow_annotate=self.allow_annotate_box.isChecked(),
             )
-            result = self.toolkit.protect(
-                source,
-                self.protect_user_password.text(),
-                self.protect_owner_password.text() or None,
-                opts,
-                output,
-            )
-            self._show_result([result], "PDF protected.")
+            self._submit_tool("protect", source, self.protect_user_password.text(), self.protect_owner_password.text() or None, opts, output, message="PDF protected.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4228,8 +4233,7 @@ class PdfUltimateMainWindow(QMainWindow):
         try:
             source = self._require_current_pdf()
             output = self.toolkit.default_output_path(source, "unlocked")
-            result = self.toolkit.unlock(source, self.unlock_password.text(), output)
-            self._show_result([result], "PDF unlocked.")
+            self._submit_tool("unlock", source, self.unlock_password.text(), output, message="PDF unlocked.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4237,14 +4241,7 @@ class PdfUltimateMainWindow(QMainWindow):
         try:
             source = self._require_current_pdf()
             output = self.toolkit.default_output_path(source, "watermark")
-            result = self.toolkit.watermark_text(
-                source,
-                self.watermark_text.text(),
-                output,
-                selection=self.watermark_pages.text(),
-                opacity=float(self.watermark_opacity.value()),
-            )
-            self._show_result([result], "Watermark applied.")
+            self._submit_tool("watermark_text", source, self.watermark_text.text(), output, message="Watermark applied.", selection=self.watermark_pages.text(), opacity=float(self.watermark_opacity.value()))
         except Exception as exc:
             self._show_error(exc)
 
@@ -4252,8 +4249,7 @@ class PdfUltimateMainWindow(QMainWindow):
         try:
             source = self._require_current_pdf()
             output = self.toolkit.default_output_path(source, "optimized")
-            result = self.toolkit.compress(source, output)
-            self._show_result([result], "Optimization complete.")
+            self._submit_tool("compress", source, output, message="Optimization complete.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4262,14 +4258,7 @@ class PdfUltimateMainWindow(QMainWindow):
             source = self._require_current_pdf()
             style_text = self.annotate_style.currentText().strip().lower()
             output = self.toolkit.default_output_path(source, f"{style_text}_annotated")
-            result = self.toolkit.annotate_text_matches(
-                source,
-                self.annotate_query_input.text(),
-                self.annotate_pages_input.text(),
-                style_text,
-                output,
-            )
-            self._show_result([result], f"{style_text.title()} annotations added.")
+            self._submit_tool("annotate_text_matches", source, self.annotate_query_input.text(), self.annotate_pages_input.text(), style_text, output, message=f"{style_text.title()} annotations added.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4277,13 +4266,7 @@ class PdfUltimateMainWindow(QMainWindow):
         try:
             source = self._require_current_pdf()
             output = self.toolkit.default_output_path(source, "redacted")
-            result = self.toolkit.redact_text_matches(
-                source,
-                self.redact_query_input.text(),
-                self.redact_pages_input.text(),
-                output,
-            )
-            self._show_result([result], "Redaction complete.")
+            self._submit_tool("redact_text_matches", source, self.redact_query_input.text(), self.redact_pages_input.text(), output, message="Redaction complete.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4311,17 +4294,43 @@ class PdfUltimateMainWindow(QMainWindow):
             if not image_path.is_file():
                 raise PdfToolkitError(f"Stamp image not found: {image_path}")
             output = self.toolkit.default_output_path(source, "stamped")
-            result = self.toolkit.stamp_image(
-                source,
-                image_path,
-                self.stamp_pages_input.text(),
-                output,
-                anchor=self._anchor_label_to_value(self.stamp_anchor.currentText()),
-                width_ratio=float(self.stamp_scale.value()),
-            )
-            self._show_result([result], "Stamp applied.")
+            self._submit_tool("stamp_image", source, image_path, self.stamp_pages_input.text(), output, message="Stamp applied.", anchor=self._anchor_label_to_value(self.stamp_anchor.currentText()), width_ratio=float(self.stamp_scale.value()))
         except Exception as exc:
             self._show_error(exc)
+
+    def _submit_tool(self, operation, *args, message="Operation complete.", callback=None, **kwargs):
+        self.tool_jobs.start(operation, list(args), kwargs)
+        self._tool_message = message
+        self._tool_callback = callback
+        self.tools_stack.setEnabled(False)
+        self.job_cancel_button.show()
+        self.statusBar().showMessage("Working... You can continue reading.")
+
+    def _tool_progress(self, progress):
+        self.statusBar().showMessage(progress.get("message", "Working..."))
+
+    def _reset_tool_controls(self):
+        self.tools_stack.setEnabled(True)
+        self.job_cancel_button.hide()
+
+    def _tool_finished(self, result):
+        self._reset_tool_controls()
+        if self._tool_callback:
+            self._tool_callback(result)
+            self.statusBar().showMessage(self._tool_message)
+        else:
+            self._show_result(result["outputs"], self._tool_message)
+        self._tool_callback = None
+
+    def _tool_failed(self, message):
+        self._reset_tool_controls()
+        self._tool_callback = None
+        self._show_error(PdfToolkitError(message))
+
+    def _tool_cancelled(self):
+        self._reset_tool_controls()
+        self._tool_callback = None
+        self.statusBar().showMessage("Operation cancelled. No output files were published.")
 
     def _show_result(self, outputs: list[Path], message: str) -> None:
         self.statusBar().showMessage(message)

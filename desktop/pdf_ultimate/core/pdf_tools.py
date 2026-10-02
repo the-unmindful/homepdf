@@ -9,9 +9,6 @@ from pathlib import Path
 from typing import Iterable
 
 import fitz
-from docx import Document
-from pypdf import PdfReader, PdfWriter
-from pypdf.constants import UserAccessPermissions as UAP
 
 from .models import ConversionResult, PdfInfo
 from .output_safety import safe_outputs
@@ -32,10 +29,12 @@ class ProtectOptions:
 
 class PdfToolkit:
     def __init__(self, output_root: Path) -> None:
+        self.progress_callback = lambda done, total: None
         self.output_root = output_root
         self.output_root.mkdir(parents=True, exist_ok=True)
 
     def inspect(self, pdf_path: Path, password: str | None = None) -> PdfInfo:
+        from pypdf import PdfReader, PdfWriter
         pdf_path = pdf_path.resolve()
         reader = PdfReader(str(pdf_path))
         if reader.is_encrypted:
@@ -66,6 +65,7 @@ class PdfToolkit:
 
     @safe_outputs
     def merge(self, pdf_paths: Iterable[Path], output_path: Path) -> Path:
+        from pypdf import PdfReader, PdfWriter
         paths = [Path(p).resolve() for p in pdf_paths]
         if len(paths) < 2:
             raise PdfToolkitError("Choose at least two PDF files to merge.")
@@ -86,6 +86,7 @@ class PdfToolkit:
 
     @safe_outputs
     def split_by_ranges(self, pdf_path: Path, range_text: str, output_dir: Path) -> list[Path]:
+        from pypdf import PdfReader, PdfWriter
         source = Path(pdf_path).resolve()
         reader = PdfReader(str(source))
         if reader.is_encrypted:
@@ -110,6 +111,7 @@ class PdfToolkit:
 
     @safe_outputs
     def split_every(self, pdf_path: Path, pages_per_file: int, output_dir: Path) -> list[Path]:
+        from pypdf import PdfReader, PdfWriter
         if pages_per_file < 1:
             raise PdfToolkitError("Pages per split file must be at least 1.")
 
@@ -476,6 +478,7 @@ class PdfToolkit:
 
     @safe_outputs
     def convert(self, pdf_path: Path, target: str, output_dir: Path) -> ConversionResult:
+        from docx import Document
         source = Path(pdf_path).resolve()
         doc = fitz.open(str(source))
         if doc.needs_pass:
@@ -583,6 +586,7 @@ class PdfToolkit:
 
     @safe_outputs
     def convert_to_pdf(self, input_paths: Iterable[Path], output_path: Path) -> Path:
+        from docx import Document
         sources = [Path(path).resolve() for path in input_paths]
         if not sources:
             raise PdfToolkitError("At least one source file is required for convert-to-PDF.")
