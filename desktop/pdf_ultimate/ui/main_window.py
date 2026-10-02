@@ -64,8 +64,9 @@ class FileDropListWidget(QListWidget):
     filesDropped = Signal(list)
     reordered = Signal()
 
-    def __init__(self) -> None:
+    def __init__(self, hint: str = "Drop files here or click Add") -> None:
         super().__init__()
+        self._hint = hint
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setAcceptDrops(True)
         self.setDragEnabled(True)
@@ -76,6 +77,14 @@ class FileDropListWidget(QListWidget):
 
     def _emit_reordered(self, *_args) -> None:
         self.reordered.emit()
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        super().paintEvent(event)
+        if self.count() == 0 and self._hint:
+            painter = QPainter(self.viewport())
+            painter.setPen(self.palette().color(QPalette.PlaceholderText))
+            painter.drawText(self.viewport().rect().adjusted(12, 12, -12, -12), Qt.AlignCenter | Qt.TextWordWrap, self._hint)
+            painter.end()
 
     def dragEnterEvent(self, event) -> None:  # type: ignore[override]
         if event.mimeData().hasUrls():
@@ -553,7 +562,7 @@ class PdfUltimateMainWindow(QMainWindow):
         merge_layout = QVBoxLayout(merge_tab)
         merge_layout.setContentsMargins(6, 6, 6, 6)
         merge_layout.setSpacing(8)
-        self.merge_list = FileDropListWidget()
+        self.merge_list = FileDropListWidget("Drop PDFs here or click Add.\nDrag to set the order, then merge.")
         self.merge_list.filesDropped.connect(self._on_merge_files_dropped)
         self.merge_list.reordered.connect(self._sync_merge_sources_from_widget)
         merge_layout.addWidget(self.merge_list, 1)
@@ -570,13 +579,18 @@ class PdfUltimateMainWindow(QMainWindow):
         queue_buttons.addWidget(clear_files)
         merge_layout.addLayout(queue_buttons)
 
-        merge_now = QPushButton("Merge Queue")
+        # Buttons keep their text: the pane cannot be dragged narrower than this row.
+        for button in (add_files, remove_files, clear_files):
+            button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + 24)
+        merge_now = QPushButton("Merge into One PDF")
         merge_now.clicked.connect(self._merge_queue)
         merge_layout.addWidget(merge_now)
 
         self.navigation_stack.addWidget(outline_tab)
         self.navigation_stack.addWidget(merge_tab)
         layout.addWidget(self.navigation_stack, 1)
+        # An explicit minimum overrides the layout's; include the merge buttons.
+        panel.setMinimumWidth(max(180, layout.minimumSize().width()))
         return panel
 
     def _build_center_panel(self) -> QWidget:
@@ -718,7 +732,9 @@ class PdfUltimateMainWindow(QMainWindow):
         layout.addWidget(self.search_row, 0)
 
         self.body_split = QSplitter(Qt.Horizontal)
-        self.body_split.setHandleWidth(10)
+        # The body splitter only hosts a zero-width legacy slot; it has no visible,
+        # draggable or double-clickable handle (that used to switch the nav pane).
+        self.body_split.setHandleWidth(0)
         self.body_split.setOpaqueResize(False)
         self.body_split.setCollapsible(0, True)
         self.thumbnail_list = QListWidget()
@@ -782,7 +798,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.body_split.setStretchFactor(0, 0)
         self.body_split.setStretchFactor(1, 1)
         self.body_split.setSizes(self._default_body_sizes)
-        self._register_splitter_handles(self.body_split, "body")
+        self.body_split.handle(1).setEnabled(False)
         self.empty_state = EmptyState()
         self.empty_state.openRequested.connect(self._pick_open_pdf)
         self.empty_state.recentChosen.connect(lambda path: self.open_documents([path]))
