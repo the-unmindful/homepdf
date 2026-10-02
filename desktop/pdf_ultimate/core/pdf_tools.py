@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from uuid import uuid4
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,7 @@ from pypdf import PdfReader, PdfWriter
 from pypdf.constants import UserAccessPermissions as UAP
 
 from .models import ConversionResult, PdfInfo
+from .output_safety import safe_outputs
 from .page_ranges import parse_page_selection, parse_split_ranges
 
 
@@ -62,6 +64,7 @@ class PdfToolkit:
             permissions=permissions,
         )
 
+    @safe_outputs
     def merge(self, pdf_paths: Iterable[Path], output_path: Path) -> Path:
         paths = [Path(p).resolve() for p in pdf_paths]
         if len(paths) < 2:
@@ -81,6 +84,7 @@ class PdfToolkit:
             writer.write(handle)
         return output_path
 
+    @safe_outputs
     def split_by_ranges(self, pdf_path: Path, range_text: str, output_dir: Path) -> list[Path]:
         source = Path(pdf_path).resolve()
         reader = PdfReader(str(source))
@@ -104,6 +108,7 @@ class PdfToolkit:
             outputs.append(out)
         return outputs
 
+    @safe_outputs
     def split_every(self, pdf_path: Path, pages_per_file: int, output_dir: Path) -> list[Path]:
         if pages_per_file < 1:
             raise PdfToolkitError("Pages per split file must be at least 1.")
@@ -132,93 +137,71 @@ class PdfToolkit:
             part += 1
         return outputs
 
-    def extract_pages(self, pdf_path: Path, selection: str, output_path: Path) -> Path:
-        source = Path(pdf_path).resolve()
-        reader = PdfReader(str(source))
-        if reader.is_encrypted:
-            raise PdfToolkitError("Encrypted PDFs must be unlocked before extracting pages.")
-
-        page_indices = parse_page_selection(selection, len(reader.pages))
-        writer = PdfWriter()
-        for index in page_indices:
-            writer.add_page(reader.pages[index])
-
-        output_path = output_path.resolve()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with output_path.open("wb") as handle:
-            writer.write(handle)
-        return output_path
-
-
-    def delete_pages(self, pdf_path: Path, selection: str, output_path: Path) -> Path:
-        """Delete selected pages and write a new PDF (does not modify the original)."""
-        source = Path(pdf_path).resolve()
-        output_path = Path(output_path).resolve()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        doc = fitz.open(str(source))
-        try:
+    def _select_pages(self, source: Path, order: list[int], output_path: Path) -> Path:
+        with fitz.open(str(source)) as doc:
             if doc.needs_pass:
-                raise PdfToolkitError("Encrypted PDFs must be unlocked before deleting pages.")
-            page_count = doc.page_count
-            delete_indices = set(parse_page_selection(selection, page_count))
-            if not delete_indices:
-                raise PdfToolkitError("No pages selected for deletion.")
-            if len(delete_indices) >= page_count:
-                raise PdfToolkitError("Cannot delete all pages (PDF must have at least 1 page).")
-
-            out = fitz.open()
-            try:
-                for i in range(page_count):
-                    if i in delete_indices:
-                        continue
-                    out.insert_pdf(doc, from_page=i, to_page=i)
-                out.save(str(output_path))
-            finally:
-                out.close()
-            return output_path
-        finally:
-            doc.close()
-
-    def reorder_pages(self, pdf_path: Path, order_text: str, output_path: Path) -> Path:
-        source = Path(pdf_path).resolve()
-        reader = PdfReader(str(source))
-        if reader.is_encrypted:
-            raise PdfToolkitError("Encrypted PDFs must be unlocked before reordering.")
-
-        order = self._parse_order_with_duplicates(order_text, len(reader.pages))
-        writer = PdfWriter()
-        for page_index in order:
-            writer.add_page(reader.pages[page_index])
-
-        output_path = output_path.resolve()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with output_path.open("wb") as handle:
-            writer.write(handle)
+                raise PdfToolkitError("Unlock this PDF before changing pages.")
+            if not order:
+                raise PdfToolkitError("PDF must retain at least one page.")
+            toc = doc.get_toc()
+            first_destination = {}
+            seen_pages = set()
+            independent_order = []
+            for new_index, old_index in enumerate(order):
+                first_destination.setdefault(old_index, new_index)
+                if old_index in seen_pages:
+                    # select() otherwise aliases duplicate page xrefs, making
+                    # bookmark destinations resolve to the last duplicate.
+                    doc.fullcopy_page(old_index)
+                    independent_order.append(doc.page_count - 1)
+                else:
+                    independent_order.append(old_index)
+                    seen_pages.add(old_index)
+            doc.select(independent_order)
+            mapped = []
+            for level, title, page_number in toc:
+                target = first_destination.get(page_number - 1)
+                if target is not None:
+                    # A removed parent cannot leave an invalid level jump.
+                    level = min(level, (mapped[-1][0] + 1) if mapped else 1)
+                    mapped.append([level, title, target + 1])
+            doc.set_toc(mapped)
+            doc.save(str(output_path), garbage=3, deflate=True)
         return output_path
 
+    @safe_outputs
+    def extract_pages(self, pdf_path: Path, selection: str, output_path: Path) -> Path:
+        with fitz.open(str(pdf_path)) as doc:
+            order = parse_page_selection(selection, doc.page_count)
+        return self._select_pages(pdf_path, order, output_path)
+
+    @safe_outputs
+    def delete_pages(self, pdf_path: Path, selection: str, output_path: Path) -> Path:
+        with fitz.open(str(pdf_path)) as doc:
+            deleted = set(parse_page_selection(selection, doc.page_count))
+            order = [i for i in range(doc.page_count) if i not in deleted]
+        return self._select_pages(pdf_path, order, output_path)
+
+    @safe_outputs
+    def reorder_pages(self, pdf_path: Path, order_text: str, output_path: Path) -> Path:
+        with fitz.open(str(pdf_path)) as doc:
+            order = self._parse_order_with_duplicates(order_text, doc.page_count)
+        return self._select_pages(pdf_path, order, output_path)
+
+    @safe_outputs
     def rotate_pages(self, pdf_path: Path, selection: str, degrees: int, output_path: Path) -> Path:
         if degrees not in {90, 180, 270}:
             raise PdfToolkitError("Rotation must be 90, 180, or 270 degrees.")
-
-        source = Path(pdf_path).resolve()
-        reader = PdfReader(str(source))
-        if reader.is_encrypted:
-            raise PdfToolkitError("Encrypted PDFs must be unlocked before rotation.")
-
-        targets = set(parse_page_selection(selection, len(reader.pages)))
-        writer = PdfWriter()
-        for index, page in enumerate(reader.pages):
-            if index in targets:
-                page.rotate(degrees)
-            writer.add_page(page)
-
-        output_path = output_path.resolve()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with output_path.open("wb") as handle:
-            writer.write(handle)
+        with fitz.open(str(pdf_path)) as doc:
+            if doc.needs_pass:
+                raise PdfToolkitError("Unlock this PDF before rotating pages.")
+            for index in parse_page_selection(selection, doc.page_count):
+                page = doc[index]
+                page.set_rotation((page.rotation + degrees) % 360)
+            doc.save(str(output_path), garbage=3, deflate=True)
         return output_path
 
+    @safe_outputs
     def watermark_text(
         self,
         pdf_path: Path,
@@ -266,70 +249,37 @@ class PdfToolkit:
         doc.close()
         return output_path
 
-    def protect(
-        self,
-        pdf_path: Path,
-        user_password: str,
-        owner_password: str | None,
-        options: ProtectOptions,
-        output_path: Path,
-    ) -> Path:
+    @safe_outputs
+    def protect(self, pdf_path: Path, user_password: str, owner_password: str | None,
+                options: ProtectOptions, output_path: Path) -> Path:
         if not user_password:
-            raise PdfToolkitError("User password is required for protect operation.")
-
-        source = Path(pdf_path).resolve()
-        reader = PdfReader(str(source))
-        if reader.is_encrypted:
-            raise PdfToolkitError("PDF is already encrypted. Unlock first if you want to re-protect.")
-
-        writer = PdfWriter()
-        for page in reader.pages:
-            writer.add_page(page)
-        if reader.metadata:
-            writer.add_metadata(reader.metadata)
-
-        permissions = UAP(0)
-        if options.allow_print:
-            permissions |= UAP.PRINT
-        if options.allow_copy:
-            permissions |= UAP.EXTRACT
-        if options.allow_modify:
-            permissions |= UAP.MODIFY
-        if options.allow_annotate:
-            permissions |= UAP.ADD_OR_MODIFY
-
-        writer.encrypt(
-            user_password=user_password,
-            owner_password=owner_password or user_password,
-            permissions_flag=permissions,
-        )
-
-        output_path = output_path.resolve()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with output_path.open("wb") as handle:
-            writer.write(handle)
+            raise PdfToolkitError("User password is required.")
+        with fitz.open(str(pdf_path)) as doc:
+            if doc.is_encrypted:
+                raise PdfToolkitError("PDF is already encrypted. Unlock it first.")
+            permissions = 0
+            for allowed, flag in [(options.allow_print, fitz.PDF_PERM_PRINT),
+                                  (options.allow_copy, fitz.PDF_PERM_COPY),
+                                  (options.allow_modify, fitz.PDF_PERM_MODIFY),
+                                  (options.allow_annotate, fitz.PDF_PERM_ANNOTATE)]:
+                if allowed:
+                    permissions |= flag
+            doc.save(str(output_path), encryption=fitz.PDF_ENCRYPT_AES_256,
+                     user_pw=user_password, owner_pw=owner_password or user_password,
+                     permissions=permissions, deflate=True)
         return output_path
 
+    @safe_outputs
     def unlock(self, pdf_path: Path, password: str, output_path: Path) -> Path:
-        source = Path(pdf_path).resolve()
-        reader = PdfReader(str(source))
-        if not reader.is_encrypted:
-            raise PdfToolkitError("PDF is not encrypted.")
-        if reader.decrypt(password) == 0:
-            raise PdfToolkitError("Invalid password.")
-
-        writer = PdfWriter()
-        for page in reader.pages:
-            writer.add_page(page)
-        if reader.metadata:
-            writer.add_metadata(reader.metadata)
-
-        output_path = output_path.resolve()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with output_path.open("wb") as handle:
-            writer.write(handle)
+        with fitz.open(str(pdf_path)) as doc:
+            if not doc.is_encrypted:
+                raise PdfToolkitError("PDF is not encrypted.")
+            if not doc.authenticate(password):
+                raise PdfToolkitError("Invalid password.")
+            doc.save(str(output_path), encryption=fitz.PDF_ENCRYPT_NONE, deflate=True)
         return output_path
 
+    @safe_outputs
     def compress(self, pdf_path: Path, output_path: Path) -> Path:
         source = Path(pdf_path).resolve()
         doc = fitz.open(str(source))
@@ -348,6 +298,7 @@ class PdfToolkit:
         doc.close()
         return output_path
 
+    @safe_outputs
     def annotate_text_matches(
         self,
         pdf_path: Path,
@@ -402,6 +353,7 @@ class PdfToolkit:
         finally:
             doc.close()
 
+    @safe_outputs
     def redact_text_matches(
         self,
         pdf_path: Path,
@@ -447,6 +399,7 @@ class PdfToolkit:
         finally:
             doc.close()
 
+    @safe_outputs
     def stamp_image(
         self,
         pdf_path: Path,
@@ -521,6 +474,7 @@ class PdfToolkit:
         finally:
             doc.close()
 
+    @safe_outputs
     def convert(self, pdf_path: Path, target: str, output_dir: Path) -> ConversionResult:
         source = Path(pdf_path).resolve()
         doc = fitz.open(str(source))
@@ -627,6 +581,7 @@ class PdfToolkit:
             "Unsupported conversion target. Supported: docx, txt, md, html, json, rtf, png, jpg."
         )
 
+    @safe_outputs
     def convert_to_pdf(self, input_paths: Iterable[Path], output_path: Path) -> Path:
         sources = [Path(path).resolve() for path in input_paths]
         if not sources:
@@ -709,8 +664,8 @@ class PdfToolkit:
             doc.close()
 
     def default_output_path(self, source_pdf: Path, operation: str, extension: str = "pdf") -> Path:
-        now = datetime.now().strftime("%Y%m%d_%H%M%S")
-        name = f"{source_pdf.stem}_{operation}_{now}.{extension.lstrip('.')}"
+        now = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        name = f"{source_pdf.stem}_{operation}_{now}_{uuid4().hex[:8]}.{extension.lstrip('.')}"
         return self.output_root / name
 
     @staticmethod
