@@ -449,7 +449,7 @@ class PdfUltimateMainWindow(QMainWindow):
         reset_layout_action.triggered.connect(self._restore_layout_defaults)
         view_menu.addAction(reset_layout_action)
 
-        text_tool_action = QAction("Cycle Text Tool", self)
+        text_tool_action = QAction("Toggle Plain Text", self)
         text_tool_action.setShortcut("Ctrl+4")
         text_tool_action.triggered.connect(self._cycle_text_tool_mode)
         view_menu.addAction(text_tool_action)
@@ -637,8 +637,8 @@ class PdfUltimateMainWindow(QMainWindow):
         if self.zoom_combo.lineEdit() is not None:
             self.zoom_combo.lineEdit().editingFinished.connect(self._on_zoom_combo_changed)
         self.text_tool_combo = VisibleComboBox()
-        self.text_tool_combo.addItems(["View", "Select Text", "Extracted Text"])
-        self.text_tool_combo.setCurrentText("Select Text")
+        self.text_tool_combo.addItems(["Pages", "Plain text"])
+        self.text_tool_combo.setCurrentText("Pages")
         self.text_tool_combo.currentTextChanged.connect(self._on_text_tool_combo_changed)
         self.right_toggle_btn = icon_button('tools', 'Show tools pane', checkable=True)
         self.right_toggle_btn.clicked.connect(self._toggle_right_panel)
@@ -675,11 +675,11 @@ class PdfUltimateMainWindow(QMainWindow):
         mode_layout.setSpacing(4)
         reader_label = QLabel('Layout')
         reader_label.setBuddy(self.view_mode_combo)
-        text_label = QLabel('Text')
+        text_label = QLabel('Show')
         text_label.setBuddy(self.text_tool_combo)
         self.view_mode_combo.setAccessibleName('Reader mode')
         self.text_tool_combo.setAccessibleName('Text mode')
-        self.text_tool_combo.setToolTip('View original pages, select text on pages, or read extracted text from the whole document.')
+        self.text_tool_combo.setToolTip('Pages: the document as printed (drag to select text). Plain text: the whole document as reflowed text.')
         for control in [reader_label, self.view_mode_combo, text_label, self.text_tool_combo]:
             mode_layout.addWidget(control)
         mode_layout.addStretch(1)
@@ -848,18 +848,17 @@ class PdfUltimateMainWindow(QMainWindow):
 
     @staticmethod
     def _text_tool_label(mode: str) -> str:
-        if mode == "select":
-            return "Select Text"
+        # Selection is always on for pages, so the choice is simply what to show.
         if mode == "convert":
-            return "Extracted Text"
-        return "View"
+            return "Plain text"
+        return "Pages"
 
     @staticmethod
     def _normalize_text_tool_mode(value: str) -> str:
         lowered = value.strip().lower()
-        if lowered.startswith("select"):
+        if lowered.startswith(("select", "pages")):
             return "select"
-        if lowered.startswith(("convert", "extract")):
+        if lowered.startswith(("convert", "extract", "plain")):
             return "convert"
         return "view"
 
@@ -867,8 +866,8 @@ class PdfUltimateMainWindow(QMainWindow):
         self._set_text_tool_mode(self._normalize_text_tool_mode(text))
 
     def _cycle_text_tool_mode(self) -> None:
-        order = ["view", "select", "convert"]
-        current = self.text_tool_mode if self.text_tool_mode in order else "view"
+        order = ["select", "convert"]
+        current = self.text_tool_mode if self.text_tool_mode in order else "select"
         idx = order.index(current)
         self._set_text_tool_mode(order[(idx + 1) % len(order)])
 
@@ -911,7 +910,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.page_image.set_selection_mode(self._text_select_active())
         self.continuous_view.set_selection_mode(self._text_select_active())
         self.view_mode_combo.setEnabled(not self._convert_text_active())
-        self.view_mode_combo.setToolTip('Page layout is retained while reading extracted text. Return to View or Select Text to change it.' if self._convert_text_active() else 'Display one PDF page or scroll continuously through pages.')
+        self.view_mode_combo.setToolTip('Page layout is kept while showing plain text. Switch Show back to Pages to change it.' if self._convert_text_active() else 'Display one PDF page or scroll continuously through pages.')
         self.text_tool_combo.blockSignals(True)
         self.text_tool_combo.setCurrentText(self._text_tool_label(self.text_tool_mode))
         self.text_tool_combo.blockSignals(False)
