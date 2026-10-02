@@ -442,6 +442,7 @@ class ReaderTests(unittest.TestCase):
         self.assertLessEqual(842 * self.window.zoom_factor, self.window.page_scroll.viewport().height())
 
     def test_default_layout_prioritizes_reading_at_laptop_width(self):
+        self.open_reader()
         self.assertGreaterEqual(self.window.page_scroll.viewport().width(), 750)
         self.assertEqual(self.window.main_splitter.sizes()[2], 0)
         for widget in self.window.toolbar_row.findChildren(QPushButton):
@@ -450,6 +451,26 @@ class ReaderTests(unittest.TestCase):
     def test_tall_tool_forms_are_scrollable(self):
         for index in range(self.window.tools_stack.count()):
             self.assertIsInstance(self.window.tools_stack.widget(index), QScrollArea)
+
+    def test_empty_state_replaces_reader_until_a_document_opens(self):
+        self.assertIs(self.window.reader_stack.currentWidget(), self.window.empty_state)
+        self.assertFalse(self.window.toolbar_row.isEnabled())
+        self.open_reader()
+        self.assertIs(self.window.reader_stack.currentWidget(), self.window.body_split)
+        self.assertTrue(self.window.toolbar_row.isEnabled())
+        self.assertIn('reader.pdf', self.window.windowTitle())
+
+    def test_tool_page_fields_start_empty_and_fall_back_to_thumbnail_selection(self):
+        self.open_reader()
+        for field in (self.window.extract_selection_input, self.window.delete_selection_input,
+                      self.window.rotate_selection_input, self.window.reorder_input):
+            self.assertEqual(field.text(), '')
+        with self.assertRaises(Exception):
+            self.window._page_selection_text(self.window.delete_selection_input)
+        self.assertEqual(self.window._page_selection_text(self.window.rotate_selection_input, default_all=True), '1-')
+        self.window.thumbnail_list.item(2).setSelected(True)
+        self.window.thumbnail_list.item(4).setSelected(True)
+        self.assertEqual(self.window._page_selection_text(self.window.delete_selection_input), '3,5')
 
     def test_navigation_switches_outline_and_thumbnails_in_one_pane(self):
         self.assertIs(self.window.thumbnail_list.parentWidget(), self.window.navigation_stack)

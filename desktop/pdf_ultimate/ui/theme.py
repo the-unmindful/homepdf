@@ -18,6 +18,7 @@ _LIGHT = {
     "selection": "#dceaff", "selection_text": "#143c70",
     "disabled": "#7a8491", "disabled_surface": "#edf0f3",
     "scroll_handle": "#b5bdc8", "scroll_hover": "#929dab", "shadow": "#7b8593",
+    "canvas": "#e4e7eb",
 }
 _DARK = {
     "window": "#202226", "surface": "#282b30", "alternate": "#2d3036",
@@ -28,6 +29,7 @@ _DARK = {
     "selection": "#254b76", "selection_text": "#f3f6fa",
     "disabled": "#858f9e", "disabled_surface": "#292d33",
     "scroll_handle": "#596271", "scroll_hover": "#727e90", "shadow": "#131518",
+    "canvas": "#17191c",
 }
 
 _STYLE = Template("""
@@ -35,7 +37,19 @@ QWidget {
   background: $window; color: $text; font-family: "Segoe UI"; font-size: 10pt;
 }
 QMainWindow, QDialog { background: $window; }
-QFrame#panel { background: $surface; border: 1px solid $soft_border; border-radius: 4px; }
+QFrame#panel { background: $window; border: none; }
+QScrollArea#readerCanvas, QScrollArea#readerCanvas > QWidget > QWidget { background: $canvas; border: none; }
+QWidget#emptyState { background: $canvas; }
+QWidget#emptyColumn { background: transparent; }
+QLabel#emptyTitle { font-size: 16pt; font-weight: 600; }
+QLabel#sectionLabel { color: $secondary; font-size: 9pt; font-weight: 600; }
+QPushButton#recentFile {
+  background: transparent; border: 1px solid transparent; border-radius: 6px;
+  padding: 6px 10px; text-align: left; color: $text;
+}
+QPushButton#recentFile:hover { background: $hover; border-color: $soft_border; }
+QListWidget#thumbnailList, QListWidget#thumbnailList::item, QListWidget#thumbnailList::item:selected,
+QListWidget#thumbnailList::item:hover { background: $window; border: none; }
 QLabel { background: transparent; border: none; }
 QLabel#title { font-size: 12pt; font-weight: 600; }
 QLabel#subtitle { color: $secondary; }

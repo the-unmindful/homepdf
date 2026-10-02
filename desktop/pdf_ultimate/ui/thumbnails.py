@@ -40,7 +40,7 @@ class ThumbnailDelegate(QStyledItemDelegate):
 
         selected = bool(option.state & QStyle.State_Selected)
         hovered = bool(option.state & QStyle.State_MouseOver)
-        accent = palette.color(QPalette.Highlight)
+        accent = palette.color(QPalette.Accent)
 
         painter.fillRect(page.adjusted(1, 2, 1, 2), QColor(0, 0, 0, 40))
         painter.fillRect(page, QColor("#ffffff"))

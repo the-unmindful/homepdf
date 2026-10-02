@@ -70,6 +70,29 @@ class ContinuousPageView(SelectablePageLabel):
             return self._page_rects[self._selection_row]
         return QRect()
 
+    def _hover_words(self, point) -> bool:
+        if not self._page_rects or self._word_provider is None:
+            return False
+        row = self.page_at_offset(point.y())
+        rect = self._page_rects[row]
+        if not rect.contains(point):
+            return False
+        x = (point.x() - rect.left()) / max(0.001, self._zoom)
+        y = (point.y() - rect.top()) / max(0.001, self._zoom)
+        for word in self._word_provider(self._page_indices[row]):
+            if word[0] - 1 <= x <= word[2] + 1 and word[1] - 1 <= y <= word[3] + 1:
+                return True
+        return False
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if self._selection_enabled and event.button() == Qt.LeftButton:
+            point = event.position().toPoint()
+            row = self.page_at_offset(point.y())
+            if self._page_rects and self._page_rects[row].contains(point) and row != self._selection_row:
+                self._selection_row = row
+                self.set_page_words(self._word_provider(self._page_indices[row]) if self._word_provider else [], self._zoom)
+        super().mouseDoubleClickEvent(event)
+
     def mousePressEvent(self, event) -> None:
         if self._selection_enabled and event.button() == Qt.LeftButton:
             point = event.position().toPoint()

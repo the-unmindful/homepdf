@@ -50,6 +50,7 @@ from pdf_ultimate.core.paths import output_root
 from pdf_ultimate.core.pdf_tools import PdfToolkit, PdfToolkitError, ProtectOptions
 from pdf_ultimate.core.worker_tasks import SearchResult, bounded_scale
 from pdf_ultimate.ui.thumbnails import ThumbnailDelegate
+from pdf_ultimate.ui.empty_state import EmptyState
 from pdf_ultimate.core.render_service import PdfRenderService
 from pdf_ultimate.core.job_service import JobService
 from pdf_ultimate.core.state_store import AppStateStore, DocumentViewState
@@ -208,7 +209,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self._preview_cache_bytes = 0
         self._preview_cache_sizes: dict[tuple[str, int, float, float], int] = {}
         self._inflight_renders: set[tuple[str, int, float, float]] = set()
-        self.text_tool_mode = "view"  # view | select | convert
+        self.text_tool_mode = "select"  # view | select | convert (select is the default, like any reader)
         self._converted_text_cache = ""
         self._converted_text_doc_token = ""
         self._text_search_spans: list[tuple[int, int]] = []
@@ -279,6 +280,7 @@ class PdfUltimateMainWindow(QMainWindow):
 
         self._build_menu()
         self._build_ui()
+        self._sync_empty_state()
         self._setup_reader_shortcuts()
         self._update_operation_history_actions()
         app = QApplication.instance()
@@ -354,6 +356,11 @@ class PdfUltimateMainWindow(QMainWindow):
         save_copy_action.triggered.connect(self._extract_pages_from_ui)
         file_menu.addAction(save_copy_action)
 
+        properties_action = QAction("Properties", self)
+        properties_action.setShortcut("Ctrl+D")
+        properties_action.triggered.connect(self._show_document_properties)
+        file_menu.addAction(properties_action)
+
         close_tab_action = QAction("Close Tab", self)
         close_tab_action.setShortcut("Ctrl+W")
         close_tab_action.triggered.connect(self._close_current_document_tab)
@@ -385,12 +392,12 @@ class PdfUltimateMainWindow(QMainWindow):
         self.view_menu = view_menu
         zoom_in = QAction("Zoom In", self)
         zoom_in.setShortcut("Ctrl++")
-        zoom_in.triggered.connect(lambda: self._change_zoom(1.15))
+        zoom_in.triggered.connect(lambda: self._step_zoom(1))
         view_menu.addAction(zoom_in)
 
         zoom_out = QAction("Zoom Out", self)
         zoom_out.setShortcut("Ctrl+-")
-        zoom_out.triggered.connect(lambda: self._change_zoom(1 / 1.15))
+        zoom_out.triggered.connect(lambda: self._step_zoom(-1))
         view_menu.addAction(zoom_out)
 
         fit_width_action = QAction("Fit Width", self)
@@ -507,19 +514,9 @@ class PdfUltimateMainWindow(QMainWindow):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
 
-        title = QLabel("HOME PDF")
-        title.setObjectName("title")
-        layout.addWidget(title)
-
-        open_btn = QPushButton("Open PDF")
-        open_btn.setProperty("primary", True)
-        open_btn.clicked.connect(self._pick_open_pdf)
-        layout.addWidget(open_btn)
-
+        # Document details live in File > Properties (Ctrl+D); the pane is navigation only.
         self.meta_label = QLabel("No document loaded.")
         self.meta_label.setWordWrap(True)
-        self.meta_label.setStyleSheet('padding:8px 0;')
-        layout.addWidget(self.meta_label)
 
         self.navigation_combo = VisibleComboBox()
         self.navigation_combo.addItems(['Pages', 'Outline', 'Merge'])
@@ -600,9 +597,9 @@ class PdfUltimateMainWindow(QMainWindow):
         self.thumb_toggle_btn = QPushButton("Hide Thumbs")
         self.thumb_toggle_btn.clicked.connect(self._toggle_thumbnail_panel)
         zoom_out = QPushButton("-")
-        zoom_out.clicked.connect(lambda: self._change_zoom(1 / 1.15))
+        zoom_out.clicked.connect(lambda: self._step_zoom(-1))
         zoom_in = QPushButton("+")
-        zoom_in.clicked.connect(lambda: self._change_zoom(1.15))
+        zoom_in.clicked.connect(lambda: self._step_zoom(1))
         self.fit_width_btn = icon_button('fit-width', 'Fit width', checkable=True)
         self.fit_width_btn.clicked.connect(self._fit_width)
         self.fit_page_btn = icon_button('fit-page', 'Fit page', checkable=True)
@@ -620,11 +617,13 @@ class PdfUltimateMainWindow(QMainWindow):
         self.zoom_combo.insertSeparator(3)
         self.zoom_combo.addItems(self.zoom_presets)
         self.zoom_combo.activated.connect(self._on_zoom_combo_changed)
+        # Declare the real minimum so the responsive toolbar wraps instead of squeezing.
+        self.zoom_combo.setMinimumWidth(min(124, self.zoom_combo.minimumSizeHint().width()))
         if self.zoom_combo.lineEdit() is not None:
             self.zoom_combo.lineEdit().editingFinished.connect(self._on_zoom_combo_changed)
         self.text_tool_combo = VisibleComboBox()
         self.text_tool_combo.addItems(["View", "Select Text", "Extracted Text"])
-        self.text_tool_combo.setCurrentText("View")
+        self.text_tool_combo.setCurrentText("Select Text")
         self.text_tool_combo.currentTextChanged.connect(self._on_text_tool_combo_changed)
         self.right_toggle_btn = icon_button('tools', 'Show tools pane', checkable=True)
         self.right_toggle_btn.clicked.connect(self._toggle_right_panel)
@@ -633,7 +632,9 @@ class PdfUltimateMainWindow(QMainWindow):
         self._build_theme_menu()
         self.page_jump_spin = QSpinBox()
         self.page_jump_spin.setRange(1, 1)
-        self.page_jump_spin.setMaximumWidth(78)
+        self.page_jump_spin.setMaximumWidth(64)
+        self.page_jump_spin.setButtonSymbols(QSpinBox.NoButtons)
+        self.page_jump_spin.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.page_jump_spin.setToolTip("Go to page")
         go_page_btn = QPushButton("Go")
         go_page_btn.clicked.connect(self._jump_to_page_from_spin)
@@ -657,7 +658,7 @@ class PdfUltimateMainWindow(QMainWindow):
         mode_layout = QHBoxLayout()
         mode_layout.setContentsMargins(0, 0, 0, 0)
         mode_layout.setSpacing(4)
-        reader_label = QLabel('Reader')
+        reader_label = QLabel('Layout')
         reader_label.setBuddy(self.view_mode_combo)
         text_label = QLabel('Text')
         text_label.setBuddy(self.text_tool_combo)
@@ -732,7 +733,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.page_scroll = QScrollArea()
         self.page_scroll.setWidgetResizable(False)
         self.page_scroll.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
-        self.page_scroll.setStyleSheet('QScrollArea{border:none;}')
+        self.page_scroll.setObjectName("readerCanvas")
         self.page_scroll.viewport().installEventFilter(self)
         self.page_scroll.verticalScrollBar().valueChanged.connect(self._on_view_scroll)
 
@@ -757,13 +758,21 @@ class PdfUltimateMainWindow(QMainWindow):
             active_highlight_provider=self._active_search_hit,
             word_provider=self._selection_words_for_page,
         )
+        self.page_image.set_selection_mode(True)
+        self.continuous_view.set_selection_mode(True)
         self.page_scroll.setWidget(self.page_stack)
         self.body_split.addWidget(self.page_scroll)
         self.body_split.setStretchFactor(0, 0)
         self.body_split.setStretchFactor(1, 1)
         self.body_split.setSizes(self._default_body_sizes)
         self._register_splitter_handles(self.body_split, "body")
-        layout.addWidget(self.body_split, 1)
+        self.empty_state = EmptyState()
+        self.empty_state.openRequested.connect(self._pick_open_pdf)
+        self.empty_state.recentChosen.connect(lambda path: self.open_documents([path]))
+        self.reader_stack = QStackedWidget()
+        self.reader_stack.addWidget(self.empty_state)
+        self.reader_stack.addWidget(self.body_split)
+        layout.addWidget(self.reader_stack, 1)
         layout.setStretch(0, 0)
         layout.setStretch(1, 1)
 
@@ -843,6 +852,18 @@ class PdfUltimateMainWindow(QMainWindow):
     def _selection_words_for_page(self, index: int) -> list[tuple]:
         if self.current_doc is None:
             return []
+        # Hover hit-testing asks for the same page repeatedly; keep a few pages.
+        cache = self.__dict__.setdefault("_word_cache", {})
+        key = (self._active_doc_token(), index)
+        if key in cache:
+            return cache[key]
+        words = self._extract_selection_words(index)
+        if len(cache) >= 12:
+            cache.pop(next(iter(cache)))
+        cache[key] = words
+        return words
+
+    def _extract_selection_words(self, index: int) -> list[tuple]:
         page = self.current_doc[index]
         words = page.get_text('words')
         if not page.rotation:
@@ -878,9 +899,22 @@ class PdfUltimateMainWindow(QMainWindow):
             if self.search_input.text().strip():
                 self._execute_search()
 
+    def _on_escape(self) -> None:
+        if self.search_row.isVisible():
+            self._hide_search_bar()
+        elif self.isFullScreen():
+            self.showNormal()
+
+    def _focus_page_jump(self) -> None:
+        if self.current_doc is not None:
+            self.page_jump_spin.setFocus(Qt.ShortcutFocusReason)
+            self.page_jump_spin.selectAll()
+
     def _setup_reader_shortcuts(self) -> None:
         bindings = [
             ("Ctrl+Tab", lambda: self._cycle_document_tab(1)),
+            ("Escape", self._on_escape),
+            ("Ctrl+G", self._focus_page_jump),
             ("Ctrl+Shift+Tab", lambda: self._cycle_document_tab(-1)),
             ("Down", lambda: self._reader_scroll_vertical(54)),
             ("Up", lambda: self._reader_scroll_vertical(-54)),
@@ -2113,6 +2147,8 @@ class PdfUltimateMainWindow(QMainWindow):
     def _refresh_recent_files_menu(self) -> None:
         if not hasattr(self, "recent_files_menu"):
             return
+        if hasattr(self, "empty_state") and self.current_pdf is None:
+            self.empty_state.set_recent(self._read_recent_file_paths())
         self.recent_files_menu.clear()
         paths = self._read_recent_file_paths()
         if not paths:
@@ -2193,7 +2229,8 @@ class PdfUltimateMainWindow(QMainWindow):
         return -1
 
     def _sync_document_tabs_visibility(self) -> None:
-        self.document_tabs.setVisible(self.document_tabs.count() > 0)
+        # A single document needs no tab strip; its name is in the window title.
+        self.document_tabs.setVisible(self.document_tabs.count() > 1)
 
     def _ensure_document_tab(self, path: Path) -> int:
         resolved = path.resolve()
@@ -2295,6 +2332,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self._close_document_tab(self.document_tabs.currentIndex())
 
     def _clear_document_workspace(self) -> None:
+        self.__dict__.get("_word_cache", {}).clear()
         self.text_jobs.cancel()
         self._save_current_document_state()
         if self.current_doc is not None:
@@ -2326,6 +2364,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self._set_scroll_content_widget(self.page_stack)
         self._set_display_size(860, 1160)
         self.page_label.setText("Page - / -")
+        self._sync_empty_state()
         self.page_jump_spin.blockSignals(True)
         self.page_jump_spin.setRange(1, 1)
         self.page_jump_spin.setValue(1)
@@ -2393,6 +2432,7 @@ class PdfUltimateMainWindow(QMainWindow):
                 self._sync_active_tab_with_current_pdf()
                 self._add_recent_file(self.current_pdf)
                 self.statusBar().showMessage("Encrypted PDF loaded. Unlock it to preview/edit.")
+                self._sync_empty_state()
                 return True
 
             self._clear_preview_cache()
@@ -3260,7 +3300,33 @@ class PdfUltimateMainWindow(QMainWindow):
         self.page_label.setText(f'Page {self.current_page_index + 1} / {len(self.page_order)}')
         self._sync_page_jump_controls()
 
+    def _sync_empty_state(self) -> None:
+        has_document = self.current_pdf is not None
+        if not hasattr(self, "reader_stack"):
+            return
+        target = 1 if has_document else 0
+        self.left_panel.setVisible(has_document)
+        if self.reader_stack.currentIndex() != target:
+            self.reader_stack.setCurrentIndex(target)
+            if has_document:
+                # Fit was computed against the start screen; refit once the reader is laid out.
+                QTimer.singleShot(0, self._apply_fit_after_layout_change)
+        if hasattr(self, "toolbar_row"):
+            self.toolbar_row.setEnabled(has_document)
+        if not has_document:
+            self.search_row.setVisible(False)
+            self.empty_state.set_recent(self._read_recent_file_paths())
+            self.setWindowTitle("HOME PDF")
+        else:
+            self.setWindowTitle(f"{self.current_pdf.name} \u2013 HOME PDF")
+
+    def _show_document_properties(self) -> None:
+        if self.current_pdf is None:
+            return
+        QMessageBox.information(self, "Document Properties", self.meta_label.text() + f"\nLocation: {self.current_pdf.parent}")
+
     def _refresh_view(self) -> None:
+        self._sync_empty_state()
         if self.current_doc is None:
             return
         if self._convert_text_active():
@@ -3475,11 +3541,58 @@ class PdfUltimateMainWindow(QMainWindow):
                 self.page_image.clear()
                 self.page_image.setText(f"Render failed: {message}")
 
+    _ZOOM_STEPS = (0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0)
+
+    def _step_zoom(self, direction: int) -> None:
+        """Ctrl+= / Ctrl+- land on standard levels, so 100% is always reachable."""
+        if not self.current_doc:
+            return
+        current = self.zoom_factor
+        if direction > 0:
+            target = next((z for z in self._ZOOM_STEPS if z > current * 1.01), self._ZOOM_STEPS[-1])
+        else:
+            target = next((z for z in reversed(self._ZOOM_STEPS) if z < current * 0.99), self._ZOOM_STEPS[0])
+        self._zoom_at(target / max(0.001, current), None)
+
+    def _zoom_at(self, factor: float, pos: QPoint | None) -> None:
+        """Zoom keeping the document point under `pos` (default: viewport centre) fixed."""
+        if not self.current_doc:
+            return
+        viewport = self.page_scroll.viewport()
+        if pos is None:
+            pos = QPoint(viewport.width() // 2, viewport.height() // 2)
+        vbar = self.page_scroll.verticalScrollBar()
+        hbar = self.page_scroll.horizontalScrollBar()
+        old_zoom = max(0.001, self.zoom_factor)
+        content_x = hbar.value() + pos.x()
+        content_y = vbar.value() + pos.y()
+        continuous = self.view_mode == "continuous" and self.page_scroll.widget() is self.continuous_view
+        row = 0
+        if continuous and self.continuous_view.page_count():
+            row = self.continuous_view.page_at_offset(content_y)
+            rect = self.continuous_view._page_rects[row]
+            doc_x = (content_x - rect.left()) / old_zoom
+            doc_y = (content_y - rect.top()) / old_zoom
+        else:
+            doc_x = content_x / old_zoom
+            doc_y = content_y / old_zoom
+        self._change_zoom(factor)
+        new_zoom = self.zoom_factor
+        if continuous and self.continuous_view.page_count():
+            rect = self.continuous_view._page_rects[min(row, self.continuous_view.page_count() - 1)]
+            target_x = rect.left() + doc_x * new_zoom - pos.x()
+            target_y = rect.top() + doc_y * new_zoom - pos.y()
+        else:
+            target_x = doc_x * new_zoom - pos.x()
+            target_y = doc_y * new_zoom - pos.y()
+        hbar.setValue(max(0, round(target_x)))
+        vbar.setValue(max(0, round(target_y)))
+
     def _change_zoom(self, factor: float) -> None:
         if not self.current_doc:
             return
         self.fit_mode = "manual"
-        self.zoom_factor = max(0.2, min(6.0, self.zoom_factor * factor))
+        self.zoom_factor = max(0.1, min(6.0, self.zoom_factor * factor))
         self._refresh_view()
         self._schedule_state_save()
 
@@ -3843,7 +3956,14 @@ class PdfUltimateMainWindow(QMainWindow):
         if event.type() == QEvent.Wheel and (event.modifiers() & Qt.ControlModifier):
             delta = event.angleDelta().y()
             if delta:
-                self._change_zoom(1.1 if delta > 0 else (1 / 1.1))
+                # Proportional: one mouse notch (120) is 10%; high-resolution touchpad
+                # deltas zoom smoothly instead of jumping 10% per tiny event.
+                pos = event.position().toPoint() if watched is page_viewport else None
+                self._zoom_at(1.1 ** (delta / 120.0), pos)
+                return True
+        if event.type() == QEvent.NativeGesture and watched is page_viewport:
+            if event.gestureType() == Qt.ZoomNativeGesture:
+                self._zoom_at(1.0 + float(event.value()), event.position().toPoint())
                 return True
         return super().eventFilter(watched, event)
 

@@ -110,6 +110,55 @@ class SelectablePageLabel(QLabel):
                 result.add(idx)
         return result
 
+    def _word_at(self, point: tuple[float, float], *, slack: float = 0.0) -> int | None:
+        px, py = point
+        for idx, (x0, y0, x1, y1, *_rest) in enumerate(self._page_words):
+            if x0 - slack <= px <= x1 + slack and y0 - slack <= py <= y1 + slack:
+                return idx
+        return None
+
+    def _nearest_word(self, point: tuple[float, float]) -> int | None:
+        """Word under the point, else the closest word on the nearest line."""
+        hit = self._word_at(point)
+        if hit is not None or not self._page_words:
+            return hit
+        px, py = point
+
+        def distance(item):
+            x0, y0, x1, y1 = item[1][:4]
+            dy = 0.0 if y0 <= py <= y1 else min(abs(py - y0), abs(py - y1))
+            dx = 0.0 if x0 <= px <= x1 else min(abs(px - x0), abs(px - x1))
+            return (dy, dx)
+
+        return min(enumerate(self._page_words), key=distance)[0]
+
+    def _indexes_for_drag(self, rect: tuple[float, float, float, float]) -> set[int]:
+        if getattr(self, "_column_mode", False):
+            return self._word_indexes_for_rect(rect)
+        sx, sy, ex, ey = rect
+        if abs(ex - sx) < 2 and abs(ey - sy) < 2:
+            return set()
+        start = self._nearest_word((sx, sy))
+        end = self._nearest_word((ex, ey))
+        if start is None or end is None:
+            return set()
+        low, high = min(start, end), max(start, end)
+        return set(range(low, high + 1))
+
+    def mouseDoubleClickEvent(self, event) -> None:  # type: ignore[override]
+        if not self._selection_enabled or event.button() != Qt.LeftButton:
+            super().mouseDoubleClickEvent(event)
+            return
+        page_point = self._point_to_page(event.position().toPoint(), clamp=False)
+        word = self._word_at(page_point) if page_point is not None else None
+        if word is not None:
+            self._selected_word_indexes = {word}
+            self._selected_text = self._build_selected_text(self._selected_word_indexes)
+            self._drag_start_page = None
+            self._drag_rect_page = None
+            self.update()
+        event.accept()
+
     def _build_selected_text(self, indexes: set[int]) -> str:
         if not indexes:
             return ""
@@ -144,13 +193,22 @@ class SelectablePageLabel(QLabel):
             return
         self.setFocus(Qt.MouseFocusReason)
         self._drag_start_page = page_point
+        self._column_mode = bool(event.modifiers() & Qt.AltModifier)
         self._drag_rect_page = (page_point[0], page_point[1], page_point[0], page_point[1])
-        self._selected_word_indexes = self._word_indexes_for_rect(self._drag_rect_page)
+        self._selected_word_indexes = self._indexes_for_drag(self._drag_rect_page)
         self._selected_text = self._build_selected_text(self._selected_word_indexes)
         self.update()
         event.accept()
 
+    def _hover_words(self, point: QPoint) -> bool:
+        """Whether `point` is over a word (subclasses may load words lazily)."""
+        page_point = self._point_to_page(point, clamp=False)
+        return page_point is not None and self._word_at(page_point, slack=1.0) is not None
+
     def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        if self._selection_enabled and self._drag_start_page is None:
+            over_text = self._hover_words(event.position().toPoint())
+            self.setCursor(Qt.IBeamCursor if over_text else Qt.ArrowCursor)
         if not self._selection_enabled or self._drag_start_page is None:
             super().mouseMoveEvent(event)
             return
@@ -159,7 +217,7 @@ class SelectablePageLabel(QLabel):
             return
         sx, sy = self._drag_start_page
         self._drag_rect_page = (sx, sy, page_point[0], page_point[1])
-        self._selected_word_indexes = self._word_indexes_for_rect(self._drag_rect_page)
+        self._selected_word_indexes = self._indexes_for_drag(self._drag_rect_page)
         self._selected_text = self._build_selected_text(self._selected_word_indexes)
         self.update()
         event.accept()
@@ -174,7 +232,7 @@ class SelectablePageLabel(QLabel):
         if page_point is not None:
             sx, sy = self._drag_start_page
             self._drag_rect_page = (sx, sy, page_point[0], page_point[1])
-            self._selected_word_indexes = self._word_indexes_for_rect(self._drag_rect_page)
+            self._selected_word_indexes = self._indexes_for_drag(self._drag_rect_page)
             self._selected_text = self._build_selected_text(self._selected_word_indexes)
         self._drag_start_page = None
         self._drag_rect_page = None
@@ -217,7 +275,7 @@ class SelectablePageLabel(QLabel):
             h = max(2, int((y1 - y0) * self._zoom))
             painter.drawRect(x, y, w, h)
 
-        if self._drag_rect_page is not None:
+        if self._drag_rect_page is not None and getattr(self, "_column_mode", False):
             x0, y0, x1, y1 = self._drag_rect_page
             left = area.left() + int(min(x0, x1) * self._zoom)
             top = area.top() + int(min(y0, y1) * self._zoom)
