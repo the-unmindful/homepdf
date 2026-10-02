@@ -93,7 +93,7 @@ def run_worker() -> int:
             bound = inspect.signature(method).bind(*args, **kwargs)
             parameter = next((name for name in ("output_path", "output_dir") if name in bound.arguments), None)
             destination = Path(bound.arguments[parameter]).resolve() if parameter else None
-            stage = Path(request["workspace"]) / "outputs"
+            stage = Path(request["workspace"]).resolve() / "outputs"
             stage.mkdir()
             if parameter:
                 bound.arguments[parameter] = stage / destination.name if parameter == "output_path" else stage

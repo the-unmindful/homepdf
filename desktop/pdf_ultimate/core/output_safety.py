@@ -43,10 +43,14 @@ def publish_file(staged: Path, destination: Path) -> Path:
             copied = Path(name)
             try:
                 shutil.copyfile(staged, copied)
-                with copied.open('rb') as handle:
+                with copied.open('r+b') as handle:
                     os.fsync(handle.fileno())
                 result = publish_file(copied, destination)
-                staged.unlink()
+                try:
+                    staged.unlink()
+                except OSError:
+                    result.unlink(missing_ok=True)
+                    raise
                 return result
             finally:
                 copied.unlink(missing_ok=True)

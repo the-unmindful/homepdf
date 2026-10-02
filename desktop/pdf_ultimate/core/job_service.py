@@ -20,7 +20,7 @@ class JobService(QObject):
 
     def __init__(self, parent=None, workspace_root=None):
         super().__init__(parent)
-        self._root = Path(workspace_root) if workspace_root else temp_root()
+        self._root = (Path(workspace_root) if workspace_root else temp_root()).resolve()
         self._process = None
         self._workspace = None
         self._buffer = b""

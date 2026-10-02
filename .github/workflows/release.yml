@@ -60,6 +60,11 @@ jobs:
           print(report)
           '@ | .\.venv\Scripts\python.exe -
           if ($LASTEXITCODE -ne 0) { throw 'Frozen reader smoke test failed.' }
+      - name: Verify frozen document formats
+        shell: pwsh
+        run: |
+          & .\.venv\Scripts\python.exe scripts/verify_portable.py release/PDFUltimate-portable/PDFUltimate.exe runtime_data/ci-formats
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen format verification failed.' }
       - name: Verify archive, icon and application startup
         shell: pwsh
         run: |

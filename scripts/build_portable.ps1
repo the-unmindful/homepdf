@@ -32,6 +32,7 @@ $pyiArgs = @(
   '--workpath', $workPath,
   '--distpath', $distPath,
   '--name', 'PDFUltimate',
+  '--runtime-hook', 'scripts/worker_bootstrap.py',
   '--exclude-module', 'numpy',
   '--exclude-module', 'PIL',
   '--exclude-module', 'tkinter',

@@ -154,6 +154,17 @@ class PdfIntegrityTests(unittest.TestCase):
                 self.toolkit.split_every(self.source, 1, folder)
         self.assertEqual(list(folder.iterdir()), [sentinel])
 
+    def test_cross_drive_publication(self):
+        from pdf_ultimate.core.output_safety import publish_file
+        validation = Path(__file__).resolve().parents[1] / 'runtime_data' / 'validation'
+        validation.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=validation) as folder:
+            staged = self.root / 'cross-drive.txt'; staged.write_text('Complete output')
+            target = Path(folder) / 'published.txt'
+            actual = publish_file(staged, target)
+            self.assertEqual(actual.read_text(), 'Complete output')
+            self.assertFalse(staged.exists())
+
     def test_default_names_are_distinct_even_in_same_second(self):
         self.assertNotEqual(self.toolkit.default_output_path(self.source, 'rotate'),
                             self.toolkit.default_output_path(self.source, 'rotate'))
