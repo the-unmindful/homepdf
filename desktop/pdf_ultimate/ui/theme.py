@@ -41,6 +41,8 @@ QFrame#panel { background: $window; border: none; }
 QScrollArea#readerCanvas, QScrollArea#readerCanvas > QWidget > QWidget { background: $canvas; border: none; }
 QWidget#emptyState { background: $canvas; }
 QWidget#emptyColumn { background: transparent; }
+QToolButton#tabClose { background: transparent; border: none; color: $secondary; padding: 0 4px; font-size: 9pt; }
+QToolButton#tabClose:hover { background: $hover; color: $text; border-radius: 3px; }
 QFrame#toolSection { background: $surface; border: 1px solid $soft_border; border-radius: 6px; }
 QFrame#toolSection QWidget#sectionBody { background: $surface; }
 QFrame#toolSection QWidget#sectionBody QLabel { color: $secondary; }

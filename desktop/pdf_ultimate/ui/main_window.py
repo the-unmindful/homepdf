@@ -590,6 +590,8 @@ class PdfUltimateMainWindow(QMainWindow):
         self.document_tabs.setMovable(True)
         self.document_tabs.setTabsClosable(True)
         self.document_tabs.setUsesScrollButtons(True)
+        self.document_tabs.setExpanding(False)
+        self.document_tabs.setElideMode(Qt.ElideMiddle)
         self.document_tabs.currentChanged.connect(self._on_document_tab_changed)
         self.document_tabs.tabCloseRequested.connect(self._close_document_tab)
         self.document_tabs.installEventFilter(self)
@@ -2258,6 +2260,12 @@ class PdfUltimateMainWindow(QMainWindow):
                 return idx
         return -1
 
+    def _tab_index_for_button(self, button) -> int:
+        for index in range(self.document_tabs.count()):
+            if self.document_tabs.tabButton(index, QTabBar.RightSide) is button:
+                return index
+        return -1
+
     def _sync_document_tabs_visibility(self) -> None:
         # A single document needs no tab strip; its name is in the window title.
         self.document_tabs.setVisible(self.document_tabs.count() > 1)
@@ -2275,6 +2283,14 @@ class PdfUltimateMainWindow(QMainWindow):
         index = self.document_tabs.addTab(self._format_tab_title(resolved))
         self.document_tabs.setTabToolTip(index, str(resolved))
         self.document_tabs.setTabData(index, str(resolved))
+        # Neutral close glyph instead of the platform's red square.
+        close = QToolButton()
+        close.setObjectName("tabClose")
+        close.setText("✕")
+        close.setAutoRaise(True)
+        close.setToolTip("Close (Ctrl+W)")
+        close.clicked.connect(lambda _checked=False, b=close: self._close_document_tab(self._tab_index_for_button(b)))
+        self.document_tabs.setTabButton(index, QTabBar.RightSide, close)
         self._sync_document_tabs_visibility()
         self._save_tab_session()
         return index
@@ -3368,7 +3384,10 @@ class PdfUltimateMainWindow(QMainWindow):
         if not hasattr(self, "reader_stack"):
             return
         target = 1 if has_document else 0
-        self.left_panel.setVisible(has_document)
+        if self.left_panel.isVisibleTo(self) != has_document:
+            self.left_panel.setVisible(has_document)
+            if hasattr(self, "left_toggle_btn"):
+                QTimer.singleShot(0, self._sync_panel_toggle_labels)
         if self.reader_stack.currentIndex() != target:
             self.reader_stack.setCurrentIndex(target)
             if has_document:
