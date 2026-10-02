@@ -44,7 +44,7 @@ from PySide6.QtWidgets import (
 from pdf_ultimate.core.paths import output_root
 from pdf_ultimate.core.pdf_tools import PdfToolkit, PdfToolkitError, ProtectOptions
 from pdf_ultimate.core.process_pool import get_process_pool
-from pdf_ultimate.core.worker_tasks import SearchResult, search_pdf_text
+from pdf_ultimate.core.worker_tasks import SearchResult, search_pdf_text, bounded_scale
 from pdf_ultimate.core.render_service import PdfRenderService
 from pdf_ultimate.core.state_store import AppStateStore, DocumentViewState
 from pdf_ultimate.ui.continuous_view import ContinuousPageView
@@ -372,7 +372,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.page_order: list[int] = []
         self.preview_cache: OrderedDict[tuple[str, int, float, float], QImage] = OrderedDict()
         self._preview_cache_limit = 220
-        self._preview_cache_max_bytes = 260 * 1024 * 1024
+        self._preview_cache_max_bytes = 96 * 1024 * 1024
         self._preview_cache_bytes = 0
         self._preview_cache_sizes: dict[tuple[str, int, float, float], int] = {}
         self._inflight_renders: set[tuple[str, int, float, float]] = set()
@@ -2493,6 +2493,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.fit_mode = "width"
         self._clear_preview_cache()
         self._inflight_renders.clear()
+        self.renderer.invalidate()
         self._clear_search()
         self._converted_text_cache = ""
         self._converted_text_doc_token = ""
@@ -2561,6 +2562,7 @@ class PdfUltimateMainWindow(QMainWindow):
                                        max(220, self.page_scroll.viewport().height()))
                 self._clear_preview_cache()
                 self._inflight_renders.clear()
+                self.renderer.invalidate()
                 self._clear_search()
                 self.thumbnail_list.clear()
                 self._thumbnail_items_by_page.clear()
@@ -2580,6 +2582,7 @@ class PdfUltimateMainWindow(QMainWindow):
 
             self._clear_preview_cache()
             self._inflight_renders.clear()
+            self.renderer.invalidate()
             self._clear_search()
             self._converted_text_cache = ""
             self._converted_text_doc_token = ""
@@ -2904,7 +2907,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self._preview_cache_bytes += size_bytes
         self.preview_cache.move_to_end(key)
         while len(self.preview_cache) > self._preview_cache_limit or (
-            self._preview_cache_bytes > self._preview_cache_max_bytes and len(self.preview_cache) > 1
+            self._preview_cache_bytes > self._preview_cache_max_bytes
         ):
             old_key, _ = self.preview_cache.popitem(last=False)
             freed = self._preview_cache_sizes.pop(old_key, 0)
@@ -2925,12 +2928,9 @@ class PdfUltimateMainWindow(QMainWindow):
         pixmap.setDevicePixelRatio(quality)
         return pixmap
 
-    def _request_render(self, key: tuple[str, int, float, float]) -> None:
+    def _request_render(self, key: tuple[str, int, float, float], priority: int = 0) -> None:
         if self.current_pdf is None:
             return
-        if key in self._inflight_renders:
-            return
-        self._inflight_renders.add(key)
         _, page_index, zoom, quality = key
         self.renderer.queue_render(
             key=key,
@@ -2938,6 +2938,7 @@ class PdfUltimateMainWindow(QMainWindow):
             page_index=page_index,
             zoom=zoom,
             quality=quality,
+            priority=priority,
         )
 
     def _get_or_request_page_image(self, index: int, zoom: float) -> QImage | None:
@@ -2947,6 +2948,9 @@ class PdfUltimateMainWindow(QMainWindow):
         if image is not None:
             return image
         self._request_render(key)
+        for previous, cached in reversed(self.preview_cache.items()):
+            if previous[:2] == key[:2] and not self._is_thumbnail_key(previous):
+                return cached
         return None
 
     def _prefetch_neighbor_pages(self, center_row_index: int, span: int = 2) -> None:
@@ -2961,7 +2965,7 @@ class PdfUltimateMainWindow(QMainWindow):
                 quality = self._effective_render_quality(actual_idx, self.zoom_factor)
                 key = self._cache_key(actual_idx, self.zoom_factor, quality)
                 if self._cache_get_image(key) is None:
-                    self._request_render(key)
+                    self._request_render(key, priority=1)
 
     def _thumbnail_key(self, actual_idx: int) -> tuple[str, int, float, float]:
         return self._cache_key(actual_idx, self._thumb_zoom, self._thumb_quality)
@@ -2987,7 +2991,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self._thumbnail_render_timer.start(40)
 
     def _queue_visible_thumbnail_renders(self) -> None:
-        if self.current_doc is None:
+        if self.current_doc is None or not self.thumbnail_list.isVisible():
             return
         count = self.thumbnail_list.count()
         if count <= 0:
@@ -3015,7 +3019,7 @@ class PdfUltimateMainWindow(QMainWindow):
             if image is not None:
                 self._update_thumbnail_icon(actual_idx, image)
             else:
-                self._request_render(key)
+                self._request_render(key, priority=2)
 
     def _ensure_converted_text_loaded(self) -> None:
         if self.current_doc is None:
@@ -3427,6 +3431,10 @@ class PdfUltimateMainWindow(QMainWindow):
     def _refresh_view(self) -> None:
         if self.current_doc is None:
             return
+        signature = (self._active_doc_token(), round(self.zoom_factor, 3))
+        if getattr(self, "_render_signature", None) != signature:
+            self.renderer.invalidate()
+            self._render_signature = signature
         anchor = self._capture_reading_anchor()
         if self.view_mode == "continuous":
             self.page_stack.setCurrentWidget(self.page_image)
@@ -3464,6 +3472,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.page_label.setText(f"Page {self.current_page_index + 1} / {page_count}")
         self._update_zoom_label()
         self.page_scroll.horizontalScrollBar().setValue(0)
+        self._get_or_request_page_image(page_indices[self.current_page_index], self.zoom_factor)
         self._prefetch_neighbor_pages(self.current_page_index, span=2)
 
     def _on_view_scroll(self, value: int) -> None:
@@ -3586,19 +3595,20 @@ class PdfUltimateMainWindow(QMainWindow):
         self.page_image.setPixmap(pixmap)
         self.page_image.setText("")
 
-    def _on_render_ready(self, key: tuple[str, int, float, float], png_bytes: bytes) -> None:
+    def _on_render_ready(self, key: tuple[str, int, float, float], pixels) -> None:
         self._inflight_renders.discard(key)
         if key[0] != self._active_doc_token():
             return
-        image = QImage.fromData(png_bytes, "PNG")
+        image = QImage(pixels.samples, pixels.width, pixels.height, pixels.stride, QImage.Format_RGB888).copy()
         if image.isNull():
             return
         self._cache_put_image(key, image)
         if self._is_thumbnail_key(key):
             self._update_thumbnail_icon(key[1], image)
+            return
 
         if self.view_mode == "continuous":
-            self.continuous_view.update()
+            self.continuous_view.update_page(key[1])
             return
         if self._convert_text_active() or self.current_doc is None:
             return
@@ -3682,9 +3692,7 @@ class PdfUltimateMainWindow(QMainWindow):
         except Exception:
             return base
 
-        logical_area = max(1.0, float(rect.width * rect.height * target_zoom * target_zoom))
-        cap = (max_pixels / logical_area) ** 0.5
-        return max(min_quality, min(base, cap))
+        return bounded_scale(rect.width, rect.height, target_zoom * base) / max(0.001, target_zoom)
 
     def _toggle_left_panel(self) -> None:
         sizes = self.main_splitter.sizes()

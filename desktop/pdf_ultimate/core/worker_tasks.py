@@ -19,21 +19,34 @@ class SearchResult:
     sequence: List[Tuple[int, int, int]]
 
 
-def render_page_png_bytes(pdf_path: str, page_index: int, zoom: float, quality: float) -> bytes:
-    """Render a single PDF page to PNG bytes using PyMuPDF (fitz)."""
-    import fitz  # local import: keep worker import-light
+MAX_RENDER_PIXELS = 12_000_000
 
-    doc = fitz.open(pdf_path)
-    try:
-        if page_index < 0 or page_index >= doc.page_count:
-            raise ValueError(f"Invalid page index: {page_index}")
+@dataclass(frozen=True, slots=True)
+class RenderedPage:
+    width: int
+    height: int
+    stride: int
+    samples: bytes
+
+
+def bounded_scale(width: float, height: float, requested: float) -> float:
+    import math
+    # Allow for the integer rounding done by MuPDF, including fractional origins.
+    scale = min(requested, math.sqrt(MAX_RENDER_PIXELS / ((width + 2) * (height + 2))))
+    while (math.ceil(width * scale) + 2) * (math.ceil(height * scale) + 2) > MAX_RENDER_PIXELS:
+        scale *= 0.995
+    return max(0.0001, scale)
+
+
+def render_page_pixels(pdf_path: str, page_index: int, zoom: float, quality: float) -> RenderedPage:
+    import fitz
+    with fitz.open(pdf_path) as doc:
         page = doc.load_page(page_index)
-        matrix = fitz.Matrix(zoom * quality, zoom * quality)
-        pix = page.get_pixmap(matrix=matrix, alpha=False)
-        # PyMuPDF Pixmap supports tobytes("png") (see PyMuPDF changelog / docs).
-        return pix.tobytes("png")
-    finally:
-        doc.close()
+        scale = bounded_scale(page.rect.width, page.rect.height, zoom * quality)
+        pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csRGB, alpha=False)
+        if pix.width * pix.height > MAX_RENDER_PIXELS:
+            raise ValueError("Page exceeds the rendering budget")
+        return RenderedPage(pix.width, pix.height, pix.stride, pix.samples)
 
 
 def search_pdf_text(

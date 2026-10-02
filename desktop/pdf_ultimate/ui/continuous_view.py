@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from bisect import bisect_right
 
 from PySide6.QtCore import QRect, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent
@@ -23,6 +24,7 @@ class ContinuousPageView(QWidget):
         self._active_highlight_provider = active_highlight_provider
         self._page_indices: list[int] = []
         self._page_rects: list[QRect] = []
+        self._tops = []
         self._zoom = 1.0
         self._margin = 18
         self._spacing = 18
@@ -33,6 +35,7 @@ class ContinuousPageView(QWidget):
         self._page_indices = list(page_indices)
         self._zoom = float(zoom)
         self._page_rects.clear()
+        self._tops.clear()
 
         if not page_sizes:
             self._canvas_size = QSize(900, 1200)
@@ -46,6 +49,7 @@ class ContinuousPageView(QWidget):
             x = self._margin + (max_width - size.width()) // 2
             rect = QRect(x, y, size.width(), size.height())
             self._page_rects.append(rect)
+            self._tops.append(y)
             y += size.height() + self._spacing
 
         total_height = y - self._spacing + self._margin if self._page_rects else 1200
@@ -64,13 +68,12 @@ class ContinuousPageView(QWidget):
     def page_at_offset(self, y_offset: int) -> int:
         if not self._page_rects:
             return 0
-        row = 0
-        for idx, rect in enumerate(self._page_rects):
-            if rect.top() <= y_offset:
-                row = idx
-            else:
-                break
-        return row
+        return max(0, bisect_right(self._tops, y_offset) - 1)
+
+    def update_page(self, page_index: int) -> None:
+        for row, actual in enumerate(self._page_indices):
+            if actual == page_index:
+                self.update(self._page_rects[row].adjusted(-2, -2, 2, 2))
 
     def paintEvent(self, event: QPaintEvent) -> None:  # type: ignore[override]
         painter = QPainter(self)
@@ -83,7 +86,11 @@ class ContinuousPageView(QWidget):
             return
 
         visible = event.rect()
-        for row, rect in enumerate(self._page_rects):
+        start = self.page_at_offset(visible.top())
+        for row in range(start, len(self._page_rects)):
+            rect = self._page_rects[row]
+            if rect.top() > visible.bottom():
+                break
             if not rect.intersects(visible):
                 continue
             page_index = self._page_indices[row]
