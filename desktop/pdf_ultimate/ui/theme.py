@@ -41,6 +41,14 @@ QFrame#panel { background: $window; border: none; }
 QScrollArea#readerCanvas, QScrollArea#readerCanvas > QWidget > QWidget { background: $canvas; border: none; }
 QWidget#emptyState { background: $canvas; }
 QWidget#emptyColumn { background: transparent; }
+QFrame#toolSection { background: $surface; border: 1px solid $soft_border; border-radius: 6px; }
+QFrame#toolSection QWidget#sectionBody { background: $surface; }
+QFrame#toolSection QWidget#sectionBody QLabel { color: $secondary; }
+QPushButton#sectionHeader {
+  background: transparent; border: none; padding: 8px 8px; font-weight: 600; text-align: left;
+}
+QPushButton#sectionHeader:hover { background: $hover; border-radius: 6px; }
+QPushButton#sectionHeader:checked { background: transparent; color: $text; }
 QLabel#emptyTitle { font-size: 16pt; font-weight: 600; }
 QLabel#sectionLabel { color: $secondary; font-size: 9pt; font-weight: 600; }
 QPushButton#recentFile {

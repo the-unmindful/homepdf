@@ -51,6 +51,7 @@ from pdf_ultimate.core.pdf_tools import PdfToolkit, PdfToolkitError, ProtectOpti
 from pdf_ultimate.core.worker_tasks import SearchResult, bounded_scale
 from pdf_ultimate.ui.thumbnails import ThumbnailDelegate
 from pdf_ultimate.ui.empty_state import EmptyState
+from pdf_ultimate.ui.tool_sections import accordionize
 from pdf_ultimate.core.render_service import PdfRenderService
 from pdf_ultimate.core.job_service import JobService
 from pdf_ultimate.core.state_store import AppStateStore, DocumentViewState
@@ -811,9 +812,20 @@ class PdfUltimateMainWindow(QMainWindow):
         layout.addWidget(self.tools_combo)
 
         self.tools_stack = QStackedWidget()
-        for build in [self._build_organize_tab, self._build_convert_tab, self._build_ocr_tab,
-                      self._build_security_tab, self._build_enhance_tab]:
+        section_titles = {
+            "organize": {"Extract Pages", "Delete Pages", "Reorder", "Rotate Pages", "Split by Ranges", "Split by Chunk Size"},
+            "convert": {"Convert PDF To", "Create PDF (drop files and reorder)", "Text Reflow"},
+            "security": {"Protect with Password", "Remove Password"},
+            "enhance": {"Watermark Text", "Compress", "Annotate Text Matches", "Redact Text Matches", "Stamp / Signature Image"},
+        }
+        self.tool_sections = {}
+        for name, build in [("organize", self._build_organize_tab), ("convert", self._build_convert_tab),
+                            ("ocr", self._build_ocr_tab), ("security", self._build_security_tab),
+                            ("enhance", self._build_enhance_tab)]:
             form = build()
+            if name in section_titles:
+                # One compact card open at a time instead of a long form.
+                self.tool_sections[name] = accordionize(form, section_titles[name])
             for label in form.findChildren(QLabel):
                 label.setWordWrap(True)
             form.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -2026,6 +2038,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.watermark_opacity.setRange(0.05, 1.0)
         self.watermark_opacity.setSingleStep(0.05)
         self.watermark_opacity.setValue(0.2)
+        self.watermark_opacity.setPrefix("Opacity  ")
 
         mark_btn = QPushButton("Apply Text Watermark")
         mark_btn.clicked.connect(self._watermark_pdf)
@@ -2038,6 +2051,8 @@ class PdfUltimateMainWindow(QMainWindow):
         layout.addWidget(self.watermark_opacity)
         layout.addWidget(mark_btn)
         layout.addSpacing(6)
+        layout.addWidget(QLabel("Compress"))
+        layout.addWidget(QLabel("Lossless: removes unused objects and recompresses streams. Page content is unchanged."))
         layout.addWidget(compress_btn)
         layout.addSpacing(10)
 
@@ -2087,6 +2102,8 @@ class PdfUltimateMainWindow(QMainWindow):
         self.stamp_scale.setRange(0.05, 0.9)
         self.stamp_scale.setSingleStep(0.01)
         self.stamp_scale.setValue(0.22)
+        self.stamp_scale.setPrefix("Width  ")
+        self.stamp_scale.setToolTip("Stamp width as a fraction of the page width")
         stamp_opts_row.addWidget(self.stamp_pages_input)
         stamp_opts_row.addWidget(self.stamp_anchor)
         stamp_opts_row.addWidget(self.stamp_scale)
