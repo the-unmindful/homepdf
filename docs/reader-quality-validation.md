@@ -1,6 +1,6 @@
 # Reader quality validation
 
-The bounded plan is complete on `codex/performance-ux`, starting from `c2a0d5a`. The initial portable candidate was built from `ff02cf0`; the current ribbon/mode/theme and Windows registration follow-up is recorded below. No release was published. All existing reading/tool workflows remain local. No framework replacement was introduced.
+The bounded plan started on `codex/performance-ux` from `c2a0d5a` and is now merged into `main`. The initial portable candidate was built from `ff02cf0`; the ribbon/mode/theme and Windows registration follow-up is recorded below. At the user's request, GitHub release `v0.1.2` was published from `1e93146`. All existing reading/tool workflows remain local. No framework replacement was introduced.
 
 ## Highest-value results
 
@@ -74,4 +74,8 @@ Physical multi-monitor DPI transitions, screen-reader behavior and actual GLM-OC
 - 81 source regressions pass. Packaged smoke checks pass at 100% and 150% scaling: rendering, bounded queue, 30 search matches, 30-file export, cancellation cleanup, six mode attachments and extracted-text search. Synthetic first render measured 156/172 ms; these are fixture timings, not universal startup claims. ZIP CRC, executable, helper and packaged icon pass verification.
 - Windows Shell enumeration reproduced two recommended HomePDF entries and three total: legacy portable and missing Local\\Programs registrations. Repair leaves one recommended and one total handler. AssocQueryString, Get-StartApps and actual PDF launch all point to `release/PDFUltimate-portable/PDFUltimate.exe` in this worktree. The obsolete running reader closed normally and the same Downloads PDF reopened through Windows' PDF default. Protected UserChoice/UserChoiceLatest values/hashes remained unchanged. No app installation was performed.
 
-Current portable executable SHA-256: `E3DA336E642B5859C8DC8899CB514A0C7977A71E47AB6C3F045A4DABD402D402`. The current ZIP is 75,229,903 bytes. The source plan is [ribbon/modes/themes](superpowers/plans/2026-10-02-ribbon-modes-themes.md); reports and Windows registration backups are under ignored `runtime_data`.
+Local validation executable SHA-256: `E3DA336E642B5859C8DC8899CB514A0C7977A71E47AB6C3F045A4DABD402D402`. That local ZIP is 75,229,903 bytes. The source plan is [ribbon/modes/themes](superpowers/plans/2026-10-02-ribbon-modes-themes.md); reports and Windows registration backups are under ignored `runtime_data`.
+
+## Published release
+
+[HomePDF v0.1.2](https://github.com/the-unmindful/homepdf/releases/tag/v0.1.2) was built from `1e93146e8cb0a4235138697cbc601d8a4ba4a041` by the Windows release workflow. All build, regression, frozen reader, format, archive/icon and startup/Start catalog checks passed. The published ZIP and checksum were downloaded and independently checked against GitHub's asset digest, ZIP CRC and source icon. Published build metadata and checksum are recorded in [latest-build.json](latest-build.json) and [SHA256SUMS.txt](SHA256SUMS.txt).

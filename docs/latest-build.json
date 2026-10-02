@@ -1,15 +1,15 @@
 {
   "application": "HomePDF",
-  "source_version": "0.1.1",
-  "build_id": "v0.1.1",
+  "source_version": "0.1.2",
+  "build_id": "v0.1.2",
   "build_date": "2026-10-02",
   "platform": "Windows x64",
   "asset": "HomePDF-portable.zip",
-  "size_bytes": 76054881,
-  "sha256": "3f25df5c21cdc279aafdc00170276c44a46a1468227df1444407384e01711ce8",
-  "source_commit": "0993f8c01a3e00716d2bec20b9bdedd6fe83ecc8",
-  "notes": "White H on deep green icon, automatic per-user Start menu registration on first launch, and double-click shortcut helper. Windows CI verified startup, shortcut target, and Start app catalog visibility.",
-  "release_tag": "v0.1.1",
-  "release_url": "https://github.com/the-unmindful/homepdf/releases/tag/v0.1.1",
-  "download_url": "https://github.com/the-unmindful/homepdf/releases/download/v0.1.1/HomePDF-portable.zip"
+  "size_bytes": 75085246,
+  "sha256": "22e93f153089a1f3b9783fc570e80bd35dd928d9fcb65205905e9e4c7e69e719",
+  "source_commit": "1e93146e8cb0a4235138697cbc601d8a4ba4a041",
+  "notes": "Rendering and worker improvements, compact icon ribbon, reader/text modes and System/Light/Dark themes. Windows CI passed regressions, frozen reader/formats, archive/icon and Start shortcut checks.",
+  "release_tag": "v0.1.2",
+  "release_url": "https://github.com/the-unmindful/homepdf/releases/tag/v0.1.2",
+  "download_url": "https://github.com/the-unmindful/homepdf/releases/download/v0.1.2/HomePDF-portable.zip"
 }
