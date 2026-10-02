@@ -135,5 +135,12 @@ jobs:
           Download HomePDF-portable.zip, extract the entire archive, and run PDFUltimate.exe. Keep all bundled folders beside the executable. No separate Python installation is required. Close an older running HomePDF before launching this build. Verify the ZIP using the attached SHA256SUMS.txt. OCR dependencies are installed separately.
           '@
           $notes | Set-Content -LiteralPath release-notes.md -Encoding utf8
-          gh release create "$env:RELEASE_TAG" HomePDF-portable.zip SHA256SUMS.txt --verify-tag --title "HomePDF $env:RELEASE_TAG — Windows portable" --notes-file release-notes.md --latest
+          gh release view "$env:RELEASE_TAG" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $env:RELEASE_TAG already exists (published manually); leaving it unchanged."
+            exit 0
+          }
+          # Pre-release tags (v1.2.3-beta.1) must never become the "latest" download.
+          if ($env:RELEASE_TAG -match '-') { $channel = @('--prerelease', '--latest=false') } else { $channel = @('--latest') }
+          gh release create "$env:RELEASE_TAG" HomePDF-portable.zip SHA256SUMS.txt --verify-tag --title "HomePDF $env:RELEASE_TAG — Windows portable" --notes-file release-notes.md @channel
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
