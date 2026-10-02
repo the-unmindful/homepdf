@@ -17,7 +17,7 @@ HomePDF (shown as **HOME PDF** in the app) is a Windows desktop PDF reader and t
 3. Run `PDFUltimate.exe`. Keep `_internal`, `scripts`, and `ocr_tool` beside the executable.
 4. Open a PDF in the app, or drag a PDF onto the executable.
 
-The reader requires no Python installation. The portable package includes the white H on deep green app icon and creates its HomePDF Start menu shortcut when first opened. Source package version is `0.2.0b2`. See the release page for the current build and checksum.
+The reader requires no Python installation. The portable package includes the white H on deep green app icon and creates its HomePDF Start menu shortcut when first opened. Source package version is `0.2.0b3`. See the release page for the current build and checksum.
 
 Windows may show an unsigned-app prompt. Settings and outputs normally live in `Documents\HOME PDF`. To keep them beside the executable, create an empty `portable.flag` file in the extracted folder; data will then use `HOME PDF_DATA`.
 
