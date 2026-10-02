@@ -15,7 +15,16 @@ from pdf_ultimate.ui.theme import STYLE_SHEET
 from pdf_ultimate.core.process_pool import shutdown_process_pool
 from pdf_ultimate.windows_integration import ensure_start_menu_shortcut
 
-_SINGLE_INSTANCE_SERVER = "pdf-ultimate-single-instance-v2"
+def _instance_server_name() -> str:
+    # One instance per installation, so a kept previous release and a new one can
+    # run side by side without handing documents to each other.
+    import hashlib
+
+    location = str(Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve().parent).lower()
+    return "pdf-ultimate-single-instance-v2-" + hashlib.sha1(location.encode("utf-8")).hexdigest()[:10]
+
+
+_SINGLE_INSTANCE_SERVER = _instance_server_name()
 _ACTIVATE_TOKEN = "__ACTIVATE__"
 _WINDOWS_APP_ID = "Local.HomePdf"
 

@@ -15,11 +15,34 @@ _logger = logging.getLogger(__name__)
 REGISTRATION_VERSION = 2
 
 
+def _registered_executable() -> Path | None:
+    """Executable currently registered as the HomePDF .pdf handler, if any."""
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Classes\HomePdf.Document\shell\open\command') as key:
+            command, _ = winreg.QueryValueEx(key, '')
+    except (ImportError, OSError):
+        return None
+    command = str(command).strip()
+    target = command.split('"')[1] if command.startswith('"') else command.split(' ')[0]
+    try:
+        return Path(target).resolve()
+    except (OSError, ValueError):
+        return None
+
+
 def ensure_start_menu_shortcut() -> bool | None:
     """Return registration success, or None for source/non-Windows runs."""
     if sys.platform != 'win32' or not getattr(sys, 'frozen', False):
         return None
     executable = Path(sys.executable).resolve()
+    other = _registered_executable()
+    if other is not None and other != executable and other.is_file():
+        # Another installed HomePDF (e.g. the previous release kept for rollback)
+        # owns the shortcut and .pdf handler. Never take it over silently; the user
+        # switches explicitly with "Add HomePDF to Start.cmd" in this folder.
+        return None
     marker = app_root() / 'start-menu-registration.json'
     registration_current = False
     try:

@@ -73,6 +73,17 @@ class StartMenuRegistrationTests(unittest.TestCase):
         self.environment_patch.start(); self.addCleanup(self.environment_patch.stop)
         (self.folder / 'scripts').mkdir()
         (self.folder / 'scripts' / 'create_start_menu_shortcut.ps1').touch()
+        # Isolate from the machine's real HomePDF registration.
+        self.registered_patch = patch("pdf_ultimate.windows_integration._registered_executable", return_value=None)
+        self.registered_patch.start(); self.addCleanup(self.registered_patch.stop)
+
+    def test_other_installed_release_is_not_taken_over(self):
+        other = self.folder / 'previous' / 'PDFUltimate.exe'
+        other.parent.mkdir()
+        other.touch()
+        with patch("pdf_ultimate.windows_integration._registered_executable", return_value=other.resolve()),                 patch.object(sys, 'frozen', True, create=True), patch.object(sys, 'executable', str(self.exe)),                 patch('pdf_ultimate.windows_integration.subprocess.run') as run:
+            self.assertIsNone(windows_integration.ensure_start_menu_shortcut())
+            run.assert_not_called()
 
     def test_source_runs_do_not_register_python_as_homepdf(self):
         with patch.object(sys, 'frozen', False, create=True), patch('subprocess.run') as run:
