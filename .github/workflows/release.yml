@@ -124,7 +124,15 @@ jobs:
           $hash = (Get-FileHash -LiteralPath HomePDF-portable.zip -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  HomePDF-portable.zip" | Set-Content -LiteralPath SHA256SUMS.txt -Encoding ascii
           $notes = @'
-          HomePDF portable for Windows 10/11 x64, with the white H on deep green app icon. Download HomePDF-portable.zip, extract the entire archive, and run PDFUltimate.exe. HomePDF adds its Start menu shortcut automatically on first launch. Keep all bundled folders beside the executable. No separate Python installation is required. Verify the ZIP using the attached SHA256SUMS.txt. OCR dependencies are installed separately.
+          HomePDF portable for Windows 10/11 x64.
+
+          This update improves rendering speed and memory bounds, keeps exports and text extraction responsive in cancellable processes, and preserves PDF structure during page operations.
+
+          The reader includes a compact icon ribbon, visible Reader and Text selectors, zoom/fit presets, and System/Light/Dark themes. Continuous is the default for new documents. Text selection and search work across reader modes, including rotated-page selection and extracted-text search.
+
+          Portable Windows registration uses the extracted executable for Start and Open with, and cleans up HomePDF-owned duplicate PDF entries without changing protected Windows default-choice hashes.
+
+          Download HomePDF-portable.zip, extract the entire archive, and run PDFUltimate.exe. Keep all bundled folders beside the executable. No separate Python installation is required. Close an older running HomePDF before launching this build. Verify the ZIP using the attached SHA256SUMS.txt. OCR dependencies are installed separately.
           '@
           $notes | Set-Content -LiteralPath release-notes.md -Encoding utf8
           gh release create "$env:RELEASE_TAG" HomePDF-portable.zip SHA256SUMS.txt --verify-tag --title "HomePDF $env:RELEASE_TAG — Windows portable" --notes-file release-notes.md --latest

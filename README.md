@@ -55,8 +55,8 @@ The script installs PyInstaller and desktop dependencies, then writes a dated ZI
 Portable downloads belong in GitHub Releases; do not commit ZIP files to the repository. To publish a new Windows build, push a new version tag:
 
 ```powershell
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.1.3
+git push origin v0.1.3
 ```
 
 Use the next unused version number. The **Publish Windows portable release** workflow builds on Windows with Python 3.11, checks the packaged app, and publishes `HomePDF-portable.zip` and `SHA256SUMS.txt` as release assets. The main download link follows the latest release automatically. An existing tag or release is not overwritten.
@@ -115,7 +115,7 @@ Virtual environments, build outputs, personal documents, session data, and model
 
 Project source is covered by the repository's [MIT license](LICENSE). Third-party dependencies retain their own licenses; see [dependency notices](THIRD_PARTY.md). The repository license does not replace licenses of libraries bundled in the portable download.
 
-## Reader quality branch
+## Reader experience
 
 Tools run in cancellable local processes, with progress and safe publication of complete results. Reading stays responsive during exports. Existing files are never silently replaced. Use Open result or Show folder after an operation.
 
