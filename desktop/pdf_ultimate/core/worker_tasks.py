@@ -82,15 +82,20 @@ def _render_from(doc, page_index: int, zoom: float, quality: float) -> RenderedP
     return RenderedPage(pix.width, pix.height, pix.stride, pix.samples)
 
 
-def render_page_pixels(pdf_path: str, page_index: int, zoom: float, quality: float) -> RenderedPage:
+def render_page_pixels(pdf_path: str, page_index: int, zoom: float, quality: float, password: str | None = None) -> RenderedPage:
     import fitz
     try:
         doc = _cached_document(pdf_path)
     except Exception:
         doc = None
-    if doc is not None and not doc.needs_pass:
+    if doc is not None and doc.is_encrypted and password:
+        doc.authenticate(password)
+    # needs_pass stays set after a successful authenticate(); is_encrypted clears.
+    if doc is not None and not doc.is_encrypted:
         return _render_from(doc, page_index, zoom, quality)
     with fitz.open(pdf_path) as doc:
+        if doc.needs_pass and password:
+            doc.authenticate(password)
         return _render_from(doc, page_index, zoom, quality)
 
 
@@ -98,6 +103,7 @@ def search_pdf_text(
     pdf_path: str,
     ordered_page_indices: List[int],
     query: str,
+    password: str | None = None,
 ) -> SearchResult:
     """Search text in the PDF and return normalized hit rectangles per page."""
     import fitz  # local import
@@ -107,6 +113,8 @@ def search_pdf_text(
         return SearchResult(hits={}, sequence=[])
 
     doc = fitz.open(pdf_path)
+    if doc.needs_pass and password:
+        doc.authenticate(password)
     try:
         hits: Dict[int, List[Tuple[float, float, float, float]]] = {}
         sequence: List[Tuple[int, int, int]] = []

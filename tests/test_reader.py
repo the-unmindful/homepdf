@@ -57,6 +57,7 @@ class ReaderTests(unittest.TestCase):
         self.window = PdfUltimateMainWindow()
         self.errors = []
         self.window._show_error = lambda error: self.errors.append(str(error))
+        self.window._ask_password = lambda path, retry=False: None
         self.window.resize(1366, 768)
         self.window.show()
         self.app.processEvents()
@@ -501,6 +502,20 @@ class ReaderTests(unittest.TestCase):
         self.window._step_zoom(-1)
         self.window._step_zoom(-1)
         self.assertAlmostEqual(self.window.zoom_factor, 0.9)
+
+    def test_locked_pdf_asks_for_password_and_renders_with_it(self):
+        answers = iter(['wrong', 'secret'])
+        self.window._ask_password = lambda path, retry=False: next(answers)
+        opened = self.window._open_pdf(self.locked, record_doc_history=False)
+        self.assertTrue(opened, self.errors)
+        self.assertFalse(self.window.current_doc.is_encrypted)
+        self.assertEqual(self.window._doc_password, 'secret')
+        self.assertEqual(self.window.continuous_view.page_count(), 1)
+        from pdf_ultimate.core import worker_tasks
+        page = worker_tasks.render_page_pixels(str(self.locked), 0, 0.5, 1.0, 'secret')
+        self.assertGreater(page.width, 0)
+        self.window._open_pdf(self.source, record_doc_history=False)
+        self.assertIsNone(self.window._doc_password)
 
     def test_reload_when_file_changes_on_disk(self):
         self.open_reader()

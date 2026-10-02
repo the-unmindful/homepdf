@@ -236,6 +236,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.operation_doc_history_cursor = -1
         self._tab_change_record_doc_history = False
         self.renderer = PdfRenderService(self, max_workers=2)
+        self._doc_password: str | None = None  # in memory only, for the open document
         self.renderer.rendered.connect(self._on_render_ready)
         self.renderer.failed.connect(self._on_render_failed)
 
@@ -2426,6 +2427,15 @@ class PdfUltimateMainWindow(QMainWindow):
         if paths:
             self.open_documents([Path(path) for path in paths])
 
+    def _ask_password(self, path: Path, retry: bool = False) -> str | None:
+        from PySide6.QtWidgets import QInputDialog
+
+        prompt = f"\u201c{path.name}\u201d is password protected.\nEnter the password to open it:"
+        if retry:
+            prompt = "That password did not work. Try again:"
+        text, ok = QInputDialog.getText(self, "Password required", prompt, QLineEdit.Password)
+        return text if ok else None
+
     @staticmethod
     def _open_unlocked(path: Path) -> fitz.Document:
         """Open from memory so Windows does not lock the file while it is displayed;
@@ -2447,7 +2457,17 @@ class PdfUltimateMainWindow(QMainWindow):
                 self.current_doc = None
             self.current_pdf = pdf_path.resolve()
             self.current_doc = self._open_unlocked(self.current_pdf)
+            self._doc_password = None
             if self.current_doc.needs_pass:
+                # Ask like any reader instead of requiring a separate unlocked copy.
+                for attempt in range(3):
+                    password = self._ask_password(self.current_pdf, retry=attempt > 0)
+                    if password is None:
+                        break
+                    if self.current_doc.authenticate(password):
+                        self._doc_password = password
+                        break
+            if self.current_doc.needs_pass and self._doc_password is None:
                 self.current_doc.close()
                 self.current_doc = None
                 self.page_order = []
@@ -2466,7 +2486,7 @@ class PdfUltimateMainWindow(QMainWindow):
                 self.outline_list.clear()
                 self.outline_targets = []
                 self.page_image.clear()
-                self.page_image.setText("Encrypted preview is locked. Use Security -> Unlock PDF.")
+                self.page_image.setText("This PDF is locked. Reopen it and enter its password, or use Tools \u25b8 Security \u25b8 Remove Password.")
                 self.page_label.setText("Page - / -")
                 self._sync_page_jump_controls()
                 self.meta_label.setText(
@@ -2513,11 +2533,11 @@ class PdfUltimateMainWindow(QMainWindow):
     def _load_metadata(self) -> None:
         if not self.current_pdf:
             return
-        info = self.toolkit.inspect(self.current_pdf)
+        info = self.toolkit.inspect(self.current_pdf, self._doc_password)
         details = [
             f"File: {info.path.name}",
             f"Pages: {info.page_count}",
-            f"Encrypted: {'Yes' if info.encrypted else 'No'}",
+            f"Encrypted: {'Yes' if info.encrypted or self._doc_password else 'No'}",
         ]
         if info.title:
             details.append(f"Title: {info.title}")
@@ -2832,6 +2852,7 @@ class PdfUltimateMainWindow(QMainWindow):
             zoom=zoom,
             quality=quality,
             priority=priority,
+            password=self._doc_password,
         )
 
     def _get_or_request_page_image(self, index: int, zoom: float) -> QImage | None:
@@ -2943,7 +2964,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.page_text_view.setPlainText("Extracting text...")
         self._text_job_token = token
         order = self.page_order if self.page_order else list(range(self.current_doc.page_count))
-        self.text_jobs.start("reader_text", [self.current_pdf, order])
+        self.text_jobs.start("reader_text", [self.current_pdf, order], {"password": self._doc_password})
 
     def _reader_text_finished(self, result):
         if self._text_job_token != self._active_doc_token():
@@ -3168,7 +3189,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self._active_search_doc_token = self._active_doc_token()
         self._search_context = (self._active_search_job_id, self._active_search_doc_token, query)
         self.search_result_label.setText("Searching...")
-        self.search_jobs.start("search", [self.current_pdf, list(self.page_order), query])
+        self.search_jobs.start("search", [self.current_pdf, list(self.page_order), query], {"password": self._doc_password})
 
     def _restart_pending_search(self):
         query = self._pending_search

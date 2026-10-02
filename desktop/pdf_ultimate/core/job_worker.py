@@ -68,12 +68,14 @@ def run_worker() -> int:
         files = []
         if operation == "search":
             from .worker_tasks import search_pdf_text
-            value = asdict(search_pdf_text(str(args[0]), args[1], args[2]))
+            value = asdict(search_pdf_text(str(args[0]), args[1], args[2], kwargs.get("password")))
         elif operation == "reader_text":
             import fitz
             parts = []
             size = 0
             with fitz.open(args[0]) as doc:
+                if doc.needs_pass and kwargs.get("password"):
+                    doc.authenticate(kwargs["password"])
                 for display, actual in enumerate(args[1], 1):
                     text = doc[actual].get_text().strip() or "[No text detected on this page]"
                     part = f"Page {display}\n{text}"

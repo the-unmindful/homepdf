@@ -46,12 +46,12 @@ class PdfRenderService(QObject):
         wanted = set(keys)
         self._pending = OrderedDict((key, job) for key, job in self._pending.items() if key in wanted or job[0] == 2)
 
-    def queue_render(self, *, key, pdf_path: Path, page_index, zoom, quality, priority=0):
+    def queue_render(self, *, key, pdf_path: Path, page_index, zoom, quality, priority=0, password=None):
         if any(job[0] == key and job[1] == self._generation for job in self._active.values()):
             return
         old = self._pending.get(key)
         priority = min(priority, old[0]) if old else priority
-        self._pending[key] = (priority, self._generation, (str(pdf_path), page_index, zoom, quality))
+        self._pending[key] = (priority, self._generation, (str(pdf_path), page_index, zoom, quality, password))
         while len(self._pending) > 24:
             worst = max(self._pending, key=lambda item: self._pending[item][0])
             self._pending.pop(worst)
