@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'desktop'))
 import fitz
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton, QComboBox, QSpinBox, QScrollArea
 from PySide6.QtGui import QFontDatabase, QFont
 from pdf_ultimate.core import paths
 from pdf_ultimate.ui.main_window import PdfUltimateMainWindow
@@ -125,6 +125,26 @@ class ReaderTests(unittest.TestCase):
         self.window._fit_page()
         self.assertEqual(self.window.fit_mode, 'page')
         self.assertLessEqual(842 * self.window.zoom_factor, self.window.page_scroll.viewport().height())
+
+    def test_default_layout_prioritizes_reading_at_laptop_width(self):
+        self.assertGreaterEqual(self.window.page_scroll.viewport().width(), 750)
+        self.assertEqual(self.window.main_splitter.sizes()[2], 0)
+        for widget in self.window.toolbar_row.findChildren(QPushButton):
+            self.assertGreaterEqual(widget.width(), widget.minimumSizeHint().width())
+
+    def test_tall_tool_forms_are_scrollable(self):
+        for index in range(self.window.tools_stack.count()):
+            self.assertIsInstance(self.window.tools_stack.widget(index), QScrollArea)
+
+    def test_navigation_switches_outline_and_thumbnails_in_one_pane(self):
+        self.assertIs(self.window.thumbnail_list.parentWidget(), self.window.navigation_stack)
+        self.assertEqual(self.window.body_split.sizes()[0], 0)
+
+    def test_narrow_window_preserves_essential_control_sizes(self):
+        self.window.resize(1000, 700)
+        self.app.processEvents()
+        for widget in self.window.toolbar_row.findChildren(QPushButton):
+            self.assertGreaterEqual(widget.width(), widget.minimumSizeHint().width())
 
 
 if __name__ == '__main__':

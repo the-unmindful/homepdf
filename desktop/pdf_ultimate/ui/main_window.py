@@ -342,7 +342,7 @@ class PdfUltimateMainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("HOME PDF")
-        self.resize(1700, 980)
+        self.resize(1366, 820)
         self.setMinimumSize(760, 560)
         self.setAcceptDrops(True)
 
@@ -385,10 +385,10 @@ class PdfUltimateMainWindow(QMainWindow):
         self._thumb_quality = 1.0
         self._thumbnail_items_by_page: dict[int, QListWidgetItem] = {}
         self.outline_targets: list[int] = []
-        self._default_main_sizes = [500, 680, 520]
-        self._default_body_sizes = [176, 724]
+        self._default_main_sizes = [220, 1100, 0]
+        self._default_body_sizes = [0, 1100]
         self._last_left_size = self._default_main_sizes[0]
-        self._last_right_size = self._default_main_sizes[2]
+        self._last_right_size = 340
         self._last_thumb_size = self._default_body_sizes[0]
         self.zoom_presets = ["50%", "67%", "75%", "90%", "100%", "110%", "125%", "150%", "175%", "200%", "250%"]
         self.search_hits: dict[int, list[tuple[float, float, float, float]]] = {}
@@ -469,6 +469,7 @@ class PdfUltimateMainWindow(QMainWindow):
         file_menu.addAction(exit_action)
 
         edit_menu = self.menuBar().addMenu("Edit")
+        self.edit_menu = edit_menu
         self.undo_operation_action = QAction("Undo File Operation", self)
         self.undo_operation_action.setShortcut("Ctrl+Z")
         self.undo_operation_action.triggered.connect(self._undo_file_operation)
@@ -480,6 +481,7 @@ class PdfUltimateMainWindow(QMainWindow):
         edit_menu.addAction(self.redo_operation_action)
 
         view_menu = self.menuBar().addMenu("View")
+        self.view_menu = view_menu
         zoom_in = QAction("Zoom In", self)
         zoom_in.setShortcut("Ctrl++")
         zoom_in.triggered.connect(lambda: self._change_zoom(1.15))
@@ -564,7 +566,7 @@ class PdfUltimateMainWindow(QMainWindow):
     def _build_ui(self) -> None:
         root = QWidget()
         root_layout = QHBoxLayout(root)
-        root_layout.setContentsMargins(14, 14, 14, 14)
+        root_layout.setContentsMargins(6, 6, 6, 6)
         root_layout.setSpacing(12)
 
         self.main_splitter = QSplitter(Qt.Horizontal)
@@ -599,16 +601,17 @@ class PdfUltimateMainWindow(QMainWindow):
 
     def _build_left_panel(self) -> QWidget:
         panel = self._panel()
-        panel.setMinimumWidth(250)
+        panel.setMinimumWidth(180)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
 
         title = QLabel("HOME PDF")
         title.setObjectName("title")
         layout.addWidget(title)
 
         open_btn = QPushButton("Open PDF")
+        open_btn.setProperty("primary", True)
         open_btn.clicked.connect(self._pick_open_pdf)
         layout.addWidget(open_btn)
 
@@ -617,10 +620,11 @@ class PdfUltimateMainWindow(QMainWindow):
         self.meta_label.setStyleSheet("color:#1e293b;background:#eef2ff;padding:10px;border-radius:10px;")
         layout.addWidget(self.meta_label)
 
-        self.left_tab_widget = QTabWidget()
-        self.left_tab_widget.setTabPosition(QTabWidget.West)
-        self.left_tab_widget.setDocumentMode(True)
-        self.left_tab_widget.setMovable(False)
+        self.navigation_combo = QComboBox()
+        self.navigation_combo.addItems(['Pages', 'Outline', 'Merge'])
+        self.navigation_stack = QStackedWidget()
+        self.navigation_combo.currentIndexChanged.connect(self.navigation_stack.setCurrentIndex)
+        layout.addWidget(self.navigation_combo)
 
         outline_tab = QWidget()
         outline_layout = QVBoxLayout(outline_tab)
@@ -657,17 +661,16 @@ class PdfUltimateMainWindow(QMainWindow):
         merge_now.clicked.connect(self._merge_queue)
         merge_layout.addWidget(merge_now)
 
-        self.left_tab_widget.addTab(outline_tab, "Outline")
-        self.left_tab_widget.addTab(merge_tab, "Merge")
-        self.left_tab_widget.setCurrentIndex(0)
-        layout.addWidget(self.left_tab_widget, 1)
+        self.navigation_stack.addWidget(outline_tab)
+        self.navigation_stack.addWidget(merge_tab)
+        layout.addWidget(self.navigation_stack, 1)
         return panel
 
     def _build_center_panel(self) -> QWidget:
         panel = self._panel()
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
 
         self.document_tabs = QTabBar()
         self.document_tabs.setDocumentMode(True)
@@ -683,7 +686,7 @@ class PdfUltimateMainWindow(QMainWindow):
         toolbar = QHBoxLayout()
         toolbar.setContentsMargins(0, 0, 0, 0)
         toolbar.setSpacing(10)
-        self.left_toggle_btn = QPushButton("Hide Left")
+        self.left_toggle_btn = QPushButton("Navigation")
         self.left_toggle_btn.clicked.connect(self._toggle_left_panel)
         prev_btn = QPushButton("Prev")
         prev_btn.clicked.connect(lambda: self._set_page(self.current_page_index - 1))
@@ -716,7 +719,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.text_tool_combo.addItems(["View", "Select Text", "Convert2Text"])
         self.text_tool_combo.setCurrentText("View")
         self.text_tool_combo.currentTextChanged.connect(self._on_text_tool_combo_changed)
-        self.right_toggle_btn = QPushButton("Hide Tools")
+        self.right_toggle_btn = QPushButton("Tools")
         self.right_toggle_btn.clicked.connect(self._toggle_right_panel)
         self.page_jump_spin = QSpinBox()
         self.page_jump_spin.setRange(1, 1)
@@ -729,24 +732,25 @@ class PdfUltimateMainWindow(QMainWindow):
         self.page_label.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.page_label.setStyleSheet("font-weight:700;color:#1e3a8a;")
 
-        toolbar.addWidget(self.left_toggle_btn)
-        toolbar.addWidget(prev_btn)
-        toolbar.addWidget(next_btn)
-        toolbar.addSpacing(8)
-        toolbar.addWidget(self.view_mode_combo)
-        toolbar.addWidget(self.thumb_toggle_btn)
-        toolbar.addWidget(zoom_out)
-        toolbar.addWidget(zoom_in)
-        toolbar.addWidget(fit_width_btn)
-        toolbar.addWidget(fit_btn)
-        toolbar.addWidget(actual_size_btn)
-        toolbar.addWidget(self.zoom_combo)
-        toolbar.addWidget(self.text_tool_combo)
+        find_btn = QPushButton('Find')
+        find_btn.clicked.connect(self._show_search_bar)
+        self.page_jump_spin.setKeyboardTracking(False)
+        self.page_jump_spin.valueChanged.connect(lambda value: self._set_page(value - 1))
+        for control in [self.left_toggle_btn, self.page_jump_spin, self.page_label,
+                        self.zoom_combo, fit_width_btn, find_btn, self.right_toggle_btn]:
+            toolbar.addWidget(control)
         toolbar.addStretch(1)
-        toolbar.addWidget(self.page_jump_spin)
-        toolbar.addWidget(go_page_btn)
-        toolbar.addWidget(self.right_toggle_btn)
-        toolbar.addWidget(self.page_label)
+        for control in [self.left_toggle_btn, fit_width_btn, find_btn, self.right_toggle_btn]:
+            control.setMinimumWidth(control.minimumSizeHint().width())
+        # Secondary reader choices remain available through View.
+        options_menu = self.view_menu.addMenu('Reader mode')
+        for name in ['Single', 'Continuous']:
+            action = options_menu.addAction(name)
+            action.triggered.connect(lambda checked=False, value=name: self.view_mode_combo.setCurrentText(value))
+        text_menu = self.view_menu.addMenu('Text')
+        for name in ['View', 'Select Text', 'Convert2Text']:
+            action = text_menu.addAction(name)
+            action.triggered.connect(lambda checked=False, value=name: self.text_tool_combo.setCurrentText(value))
         self.toolbar_row = FlexibleWidthRow()
         self.toolbar_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.toolbar_row.setLayout(toolbar)
@@ -794,7 +798,11 @@ class PdfUltimateMainWindow(QMainWindow):
         self.thumbnail_list.model().rowsMoved.connect(self._on_thumbnail_reordered)
         self.thumbnail_list.verticalScrollBar().valueChanged.connect(self._schedule_visible_thumbnail_renders)
         self.thumbnail_list.viewport().installEventFilter(self)
-        self.body_split.addWidget(self.thumbnail_list)
+        self.navigation_stack.insertWidget(0, self.thumbnail_list)
+        self.navigation_stack.setCurrentIndex(0)
+        self.legacy_thumbnail_slot = QWidget()
+        self.legacy_thumbnail_slot.setMaximumWidth(0)
+        self.body_split.addWidget(self.legacy_thumbnail_slot)
 
         self.page_scroll = QScrollArea()
         self.page_scroll.setWidgetResizable(False)
@@ -840,10 +848,10 @@ class PdfUltimateMainWindow(QMainWindow):
 
     def _build_right_panel(self) -> QWidget:
         panel = self._panel()
-        panel.setMinimumWidth(260)
+        panel.setMinimumWidth(300)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
 
         tools_title = QLabel("Tool Studio")
         tools_title.setObjectName("title")
@@ -856,11 +864,17 @@ class PdfUltimateMainWindow(QMainWindow):
         layout.addWidget(self.tools_combo)
 
         self.tools_stack = QStackedWidget()
-        self.tools_stack.addWidget(self._build_organize_tab())
-        self.tools_stack.addWidget(self._build_convert_tab())
-        self.tools_stack.addWidget(self._build_ocr_tab())
-        self.tools_stack.addWidget(self._build_security_tab())
-        self.tools_stack.addWidget(self._build_enhance_tab())
+        for build in [self._build_organize_tab, self._build_convert_tab, self._build_ocr_tab,
+                      self._build_security_tab, self._build_enhance_tab]:
+            form = build()
+            for label in form.findChildren(QLabel):
+                label.setWordWrap(True)
+            form.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            scroll.setWidget(form)
+            self.tools_stack.addWidget(scroll)
         self.tools_stack.setCurrentIndex(0)
         layout.addWidget(self.tools_stack, 1)
         return panel
@@ -3681,7 +3695,7 @@ class PdfUltimateMainWindow(QMainWindow):
             sizes[0] = 0
             self.main_splitter.setSizes(sizes)
         else:
-            restored = max(250, self._last_left_size)
+            restored = max(180, min(260, self._last_left_size))
             sizes[0] = restored
             sizes[1] = max(100, sizes[1] - restored)
             self.main_splitter.setSizes(sizes)
@@ -3697,7 +3711,7 @@ class PdfUltimateMainWindow(QMainWindow):
             sizes[2] = 0
             self.main_splitter.setSizes(sizes)
         else:
-            restored = max(260, self._last_right_size)
+            restored = max(300, self._last_right_size)
             sizes[2] = restored
             sizes[1] = max(100, sizes[1] - restored)
             self.main_splitter.setSizes(sizes)
@@ -3705,20 +3719,10 @@ class PdfUltimateMainWindow(QMainWindow):
         self._on_layout_changed()
 
     def _toggle_thumbnail_panel(self) -> None:
-        sizes = self.body_split.sizes()
-        thumb_width = sizes[0]
-        if thumb_width > 12:
-            self._last_thumb_size = thumb_width
-            sizes[1] = max(100, sizes[1] + thumb_width)
-            sizes[0] = 0
-            self.body_split.setSizes(sizes)
-        else:
-            restored = max(96, self._last_thumb_size)
-            sizes[0] = restored
-            sizes[1] = max(100, sizes[1] - restored)
-            self.body_split.setSizes(sizes)
-        self._sync_thumbnail_toggle_label()
-        self._on_layout_changed()
+        self.navigation_combo.setCurrentIndex(0)
+        if self.main_splitter.sizes()[0] <= 12:
+            self._toggle_left_panel()
+        self._schedule_visible_thumbnail_renders()
 
     def _toggle_fullscreen(self) -> None:
         if self.isFullScreen():
@@ -3739,8 +3743,8 @@ class PdfUltimateMainWindow(QMainWindow):
 
     def _sync_panel_toggle_labels(self) -> None:
         sizes = self.main_splitter.sizes()
-        self.left_toggle_btn.setText("Show Left" if sizes[0] <= 12 else "Hide Left")
-        self.right_toggle_btn.setText("Show Tools" if sizes[2] <= 12 else "Hide Tools")
+        self.left_toggle_btn.setText("Navigation")
+        self.right_toggle_btn.setText("Tools")
 
     def _sync_thumbnail_toggle_label(self) -> None:
         sizes = self.body_split.sizes()
@@ -3802,7 +3806,7 @@ class PdfUltimateMainWindow(QMainWindow):
         try:
             self._last_right_size = int(layout_payload.get("last_right", self._default_main_sizes[2]))
         except Exception:
-            self._last_right_size = self._default_main_sizes[2]
+            self._last_right_size = 340
         try:
             self._last_thumb_size = int(layout_payload.get("last_thumb", self._default_body_sizes[0]))
         except Exception:
@@ -3815,7 +3819,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.main_splitter.setSizes(list(self._default_main_sizes))
         self.body_split.setSizes(list(self._default_body_sizes))
         self._last_left_size = self._default_main_sizes[0]
-        self._last_right_size = self._default_main_sizes[2]
+        self._last_right_size = 340
         self._last_thumb_size = self._default_body_sizes[0]
         self._sync_panel_toggle_labels()
         self._sync_thumbnail_toggle_label()
@@ -3877,6 +3881,15 @@ class PdfUltimateMainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
+        if hasattr(self, 'main_splitter'):
+            sizes = self.main_splitter.sizes()
+            if self.width() < 1100 and sizes[0] > 0:
+                sizes[1] += sizes[0]
+                sizes[0] = 0
+            if self.width() < 1200 and sizes[2] > 0:
+                sizes[1] += sizes[2]
+                sizes[2] = 0
+            self.main_splitter.setSizes(sizes)
         self._on_layout_changed()
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
