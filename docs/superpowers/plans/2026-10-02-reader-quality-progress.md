@@ -8,3 +8,4 @@ Pre-flight: Task 1 unique publication is consumed by Task 5 staging. Task 4 raw 
 
 Ruling: execute inline with one fresh final reviewer. No per-task implementer agents. The Windows environment has no Bash command on PATH; preserve equivalent task/test/commit records in this tracked ledger instead of depending on shell-only skill scripts. Cost if wrong: bookkeeping tooling differs; test evidence and Git history remain reproducible.
 Task 1: complete. Eight preservation/collision tests failed RED, then all 12 suite tests passed GREEN. Ruling: duplicate selections use independent page copies so bookmarks resolve to the first occurrence; cost if wrong: duplicate-page navigation needs further fixture coverage.
+Task 2: complete. Six real-widget regression tests failed RED and passed GREEN; full suite 18/18. Viewer attachment, locked/unreadable state, zoom anchor and continuous Fit Page are corrected.

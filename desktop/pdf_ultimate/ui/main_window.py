@@ -928,7 +928,7 @@ class PdfUltimateMainWindow(QMainWindow):
             self.page_text_view.setExtraSelections([])
         self._update_search_result_label()
         if self.current_doc is not None:
-            self._set_page(self.current_page_index, record_history=False)
+            self._refresh_view()
 
     def _setup_reader_shortcuts(self) -> None:
         bindings = [
@@ -2473,6 +2473,7 @@ class PdfUltimateMainWindow(QMainWindow):
             self.current_doc = None
         self.current_pdf = None
         self.page_order = []
+        self.continuous_view.configure([], [], 1.0)
         self.current_page_index = 0
         self.zoom_factor = 1.0
         self.fit_mode = "width"
@@ -2531,11 +2532,19 @@ class PdfUltimateMainWindow(QMainWindow):
             self._save_current_document_state()
             if self.current_doc is not None:
                 self.current_doc.close()
+                self.current_doc = None
             self.current_pdf = pdf_path.resolve()
             self.current_doc = fitz.open(str(self.current_pdf))
             if self.current_doc.needs_pass:
                 self.current_doc.close()
                 self.current_doc = None
+                self.page_order = []
+                self.current_page_index = 0
+                self.continuous_view.configure([], [], 1.0)
+                self.page_stack.setCurrentWidget(self.page_image)
+                self._set_scroll_content_widget(self.page_stack)
+                self._set_display_size(max(220, self.page_scroll.viewport().width()),
+                                       max(220, self.page_scroll.viewport().height()))
                 self._clear_preview_cache()
                 self._inflight_renders.clear()
                 self._clear_search()
@@ -2563,6 +2572,7 @@ class PdfUltimateMainWindow(QMainWindow):
             self._text_search_spans = []
             self._text_search_cursor = -1
             self.current_page_index = 0
+            self.continuous_view.configure([], [], 1.0)
             self.zoom_factor = 1.0
             self.fit_mode = "width"
             self._load_metadata()
@@ -2577,6 +2587,9 @@ class PdfUltimateMainWindow(QMainWindow):
             self.statusBar().showMessage(f"Loaded {self.current_pdf.name}")
             return True
         except Exception as exc:
+            self.current_doc = None
+            self.current_pdf = None
+            self._clear_document_workspace()
             self._show_error(exc)
             return False
 
@@ -3365,18 +3378,52 @@ class PdfUltimateMainWindow(QMainWindow):
         vbar.setValue(max(0, min(vbar.maximum(), int(y0 * self.zoom_factor) - 64)))
         hbar.setValue(max(0, min(hbar.maximum(), int(x0 * self.zoom_factor) - 36)))
 
+    def _capture_reading_anchor(self) -> tuple[int, float, float] | None:
+        if self.current_doc is None:
+            return None
+        vbar = self.page_scroll.verticalScrollBar()
+        hbar = self.page_scroll.horizontalScrollBar()
+        if self.page_scroll.widget() is self.continuous_view and self.continuous_view.page_count():
+            row = self.continuous_view.page_at_offset(vbar.value() + 8)
+            scale = max(0.001, self.continuous_view._zoom)
+            offset = (vbar.value() - self.continuous_view.page_top(row)) / scale
+            return row, offset, hbar.value() / scale
+        if self.page_scroll.widget() is self.page_stack:
+            scale = max(0.001, getattr(self, '_single_display_zoom', self.zoom_factor))
+            return self.current_page_index, vbar.value() / scale, hbar.value() / scale
+        return None
+
+    def _restore_reading_anchor(self, anchor: tuple[int, float, float] | None) -> None:
+        if anchor is None or self.current_doc is None:
+            return
+        page, y, x = anchor
+        self.current_page_index = max(0, min(len(self.page_order) - 1, page))
+        top = self.continuous_view.page_top(self.current_page_index) if self.view_mode == 'continuous' else 0
+        vbar = self.page_scroll.verticalScrollBar()
+        hbar = self.page_scroll.horizontalScrollBar()
+        vbar.blockSignals(True)
+        hbar.blockSignals(True)
+        vbar.setValue(max(0, top + round(y * self.zoom_factor)))
+        hbar.setValue(max(0, round(x * self.zoom_factor)))
+        vbar.blockSignals(False)
+        hbar.blockSignals(False)
+        self.page_label.setText(f'Page {self.current_page_index + 1} / {len(self.page_order)}')
+        self._sync_page_jump_controls()
+
     def _refresh_view(self) -> None:
         if self.current_doc is None:
             return
+        anchor = self._capture_reading_anchor()
         if self.view_mode == "continuous":
             self.page_stack.setCurrentWidget(self.page_image)
             self._set_scroll_content_widget(self.continuous_view)
             self._render_continuous_document()
-            target_y = self.continuous_view.page_top(self.current_page_index)
-            self.page_scroll.verticalScrollBar().setValue(max(0, target_y - 8))
+            if anchor is not None:
+                self._restore_reading_anchor(anchor)
             return
         self._set_scroll_content_widget(self.page_stack)
         self._set_page(self.current_page_index)
+        self._restore_reading_anchor(anchor)
 
     def _render_continuous_document(self) -> None:
         if self.current_doc is None:
@@ -3454,6 +3501,7 @@ class PdfUltimateMainWindow(QMainWindow):
         page = self.current_doc.load_page(actual_idx)
         target_width = max(80, int(page.rect.width * self.zoom_factor))
         target_height = max(80, int(page.rect.height * self.zoom_factor))
+        self._single_display_zoom = self.zoom_factor
         self._set_display_size(target_width, target_height)
 
         if self._convert_text_active():
@@ -3568,9 +3616,6 @@ class PdfUltimateMainWindow(QMainWindow):
 
     def _fit_page(self) -> None:
         if not self.current_doc:
-            return
-        if self.view_mode == "continuous":
-            self._fit_width()
             return
         self.fit_mode = "page"
         viewport_width = max(120, self.page_scroll.viewport().width() - 34)
