@@ -33,13 +33,13 @@ class JobTests(unittest.TestCase):
             self.app.processEvents(); time.sleep(.005)
         self.assertFalse(self.service.busy)
     def test_export_is_responsive_and_collision_safe(self):
-        output = self.root / "out"; output.mkdir(); prior = output / (self.source.stem + "_page_1.png")
+        output = self.root / "out"; output.mkdir(); prior = output / (self.source.stem + "_page_001.png")
         prior.write_bytes(b"sentinel")
         ticks = []; timer = QTimer(); timer.timeout.connect(lambda: ticks.append(1)); timer.start(10)
         self.service.start("convert", [self.source, "png", output]); self.wait_idle(); timer.stop()
         self.assertFalse(self.errors); self.assertEqual(len(self.results[0]["outputs"]), 30)
         self.assertEqual(prior.read_bytes(), b"sentinel"); self.assertGreater(len(ticks), 5)
-        self.assertTrue(self.progress); self.assertEqual(list((self.root / "jobs").iterdir()), [])
+        self.assertTrue(any(item.get("done", 0) >= 2 for item in self.progress)); self.assertEqual(list((self.root / "jobs").iterdir()), [])
     def test_cancel_cleans_private_outputs(self):
         self.service.start("convert", [self.source, "png", self.root / "cancelled"])
         self.app.processEvents(); self.service.cancel(); self.wait_idle()

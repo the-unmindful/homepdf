@@ -140,6 +140,52 @@ class ReaderTests(unittest.TestCase):
         self.assertTrue(self.window.ocr_run_button.isEnabled())
         self.assertFalse(self.window.ocr_cancel_button.isEnabled())
 
+    def test_close_cancels_owned_ocr(self):
+        with patch.object(self.window, '_cancel_ocr') as cancel:
+            self.window.close()
+            cancel.assert_called_once()
+
+    def test_failed_worker_start_does_not_leave_disabled_tools(self):
+        def fail(*_args, **_kwargs):
+            self.window.tool_jobs.failed.emit('Failed to start')
+        with patch.object(self.window.tool_jobs, 'start', side_effect=fail):
+            self.window._submit_tool('compress', self.source, self.root / 'out.pdf')
+        self.assertTrue(self.window.tools_stack.isEnabled())
+        self.assertTrue(self.window.job_cancel_button.isHidden())
+        self.assertIsNone(self.window._tool_callback)
+
+    def test_fit_large_page_allows_scale_below_manual_minimum(self):
+        path = self.root / 'a0.pdf'
+        with fitz.open() as doc:
+            doc.new_page(width=2384, height=3370); doc.save(path)
+        self.window._open_pdf(path, record_doc_history=False)
+        self.window._fit_page(); self.app.processEvents()
+        page_height = 3370 * self.window.zoom_factor
+        self.assertLessEqual(page_height, self.window.page_scroll.viewport().height() - 12)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows process tree ownership')
+    def test_close_terminates_ocr_descendants(self):
+        from PySide6.QtCore import QProcess
+        import subprocess, time
+        proc = QProcess(self.window)
+        command = "import subprocess,sys,time; child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); print(child.pid,flush=True); time.sleep(60)"
+        proc.start(sys.executable, ['-c', command])
+        self.assertTrue(proc.waitForStarted(3000))
+        output = b''; deadline = time.monotonic() + 5
+        while b'\n' not in output and time.monotonic() < deadline:
+            self.app.processEvents(); output += bytes(proc.readAllStandardOutput()); time.sleep(.01)
+        child_pid = int(output.strip())
+        self.window._ocr_process = proc
+        self.window._ocr_job_active = True
+        proc.finished.connect(self.window._on_ocr_job_finished)
+        try:
+            self.window.close()
+            result = subprocess.run(['tasklist.exe', '/FI', f'PID eq {child_pid}', '/FO', 'CSV', '/NH'], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            self.assertNotIn(f'"{child_pid}"', result.stdout)
+        finally:
+            if proc.state() != QProcess.NotRunning: proc.kill(); proc.waitForFinished(1000)
+            subprocess.run(['taskkill.exe', '/PID', str(child_pid), '/T', '/F'], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+
     def test_fit_page_fits_height_in_continuous_mode(self):
         self.open_reader()
         self.window.main_splitter.setSizes([0, 1300, 0])

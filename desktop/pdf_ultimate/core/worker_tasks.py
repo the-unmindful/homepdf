@@ -35,7 +35,7 @@ def bounded_scale(width: float, height: float, requested: float) -> float:
     scale = min(requested, math.sqrt(MAX_RENDER_PIXELS / ((width + 2) * (height + 2))))
     while (math.ceil(width * scale) + 2) * (math.ceil(height * scale) + 2) > MAX_RENDER_PIXELS:
         scale *= 0.995
-    return max(0.0001, scale)
+    return scale
 
 
 def render_page_pixels(pdf_path: str, page_index: int, zoom: float, quality: float) -> RenderedPage:

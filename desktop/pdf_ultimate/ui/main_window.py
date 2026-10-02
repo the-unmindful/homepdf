@@ -543,7 +543,7 @@ class PdfUltimateMainWindow(QMainWindow):
         toggle_left.triggered.connect(self._toggle_left_panel)
         view_menu.addAction(toggle_left)
 
-        toggle_right = QAction("Toggle Tool Studio", self)
+        toggle_right = QAction("Toggle Tools", self)
         toggle_right.setShortcut("Ctrl+2")
         toggle_right.triggered.connect(self._toggle_right_panel)
         view_menu.addAction(toggle_right)
@@ -648,7 +648,7 @@ class PdfUltimateMainWindow(QMainWindow):
 
         self.meta_label = QLabel("No document loaded.")
         self.meta_label.setWordWrap(True)
-        self.meta_label.setStyleSheet("color:#1e293b;background:#eef2ff;padding:10px;border-radius:10px;")
+        self.meta_label.setStyleSheet("color:#26382e;background:#edf2ee;padding:10px;border-radius:10px;")
         layout.addWidget(self.meta_label)
 
         self.navigation_combo = QComboBox()
@@ -761,7 +761,7 @@ class PdfUltimateMainWindow(QMainWindow):
 
         self.page_label = QLabel("Page - / -")
         self.page_label.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        self.page_label.setStyleSheet("font-weight:700;color:#1e3a8a;")
+        self.page_label.setStyleSheet("font-weight:700;color:#195b38;")
 
         find_btn = QPushButton('Find')
         find_btn.clicked.connect(self._show_search_bar)
@@ -803,7 +803,7 @@ class PdfUltimateMainWindow(QMainWindow):
         search_next_btn = QPushButton("Next")
         search_next_btn.clicked.connect(self._search_next)
         self.search_result_label = QLabel("0 / 0")
-        self.search_result_label.setStyleSheet("color:#1e3a8a;font-weight:600;")
+        self.search_result_label.setStyleSheet("color:#195b38;font-weight:600;")
         close_search_btn = QPushButton("Close")
         close_search_btn.clicked.connect(self._hide_search_bar)
         search_layout.addWidget(self.search_input, 1)
@@ -839,7 +839,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.page_scroll.setWidgetResizable(False)
         self.page_scroll.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
         self.page_scroll.setStyleSheet(
-            "QScrollArea{background:#e8eef8;border:1px solid #d0dceb;border-radius:12px;}"
+            "QScrollArea{background:#e9eeeb;border:1px solid #d1dcd5;border-radius:4px;}"
         )
         self.page_scroll.viewport().installEventFilter(self)
         self.page_scroll.verticalScrollBar().valueChanged.connect(self._on_view_scroll)
@@ -848,12 +848,12 @@ class PdfUltimateMainWindow(QMainWindow):
         self.page_image = SelectablePageLabel("Open a PDF to preview")
         self.page_image.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
         self.page_image.setContentsMargins(0, 0, 0, 0)
-        self.page_image.setStyleSheet("background:#ffffff;border:1px solid #d7e2f2;border-radius:8px;")
+        self.page_image.setStyleSheet("background:#ffffff;border:1px solid #d1dcd5;border-radius:8px;")
         self.page_text_view = QTextEdit()
         self.page_text_view.setReadOnly(True)
         self.page_text_view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.page_text_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.page_text_view.setStyleSheet("background:#ffffff;border:1px solid #d7e2f2;border-radius:8px;")
+        self.page_text_view.setStyleSheet("background:#ffffff;border:1px solid #d1dcd5;border-radius:8px;")
         self.page_stack.addWidget(self.page_image)
         self.page_stack.addWidget(self.page_text_view)
         self.page_stack.setCurrentWidget(self.page_image)
@@ -884,7 +884,7 @@ class PdfUltimateMainWindow(QMainWindow):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
 
-        tools_title = QLabel("Tool Studio")
+        tools_title = QLabel("Tools")
         tools_title.setObjectName("title")
         tools_title.setStyleSheet("font-size:14pt;")
         layout.addWidget(tools_title)
@@ -1679,6 +1679,11 @@ class PdfUltimateMainWindow(QMainWindow):
             return
         self.ocr_log_view.moveCursor(QTextCursor.End)
         self.ocr_log_view.insertPlainText(text[-32_000:])
+        if self.ocr_log_view.document().characterCount() > 500_000:
+            cursor = QTextCursor(self.ocr_log_view.document())
+            cursor.setPosition(0)
+            cursor.setPosition(self.ocr_log_view.document().characterCount() - 400_000, QTextCursor.KeepAnchor)
+            cursor.removeSelectedText()
         self.ocr_log_view.moveCursor(QTextCursor.End)
 
     def _set_ocr_busy(self, busy):
@@ -2826,7 +2831,8 @@ class PdfUltimateMainWindow(QMainWindow):
         if self.current_doc is None:
             return None
         page = self.current_doc.load_page(index)
-        matrix = fitz.Matrix(zoom * quality, zoom * quality)
+        scale = bounded_scale(page.rect.width, page.rect.height, zoom * quality)
+        matrix = fitz.Matrix(scale, scale)
         pix = page.get_pixmap(matrix=matrix, alpha=False)
         return QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888).copy()
 
@@ -2865,15 +2871,22 @@ class PdfUltimateMainWindow(QMainWindow):
         if self.current_doc is None:
             return
         total = len(self.page_order) if self.page_order else self.current_doc.page_count
-        for delta in range(1, span + 1):
-            for row in (center_row_index - delta, center_row_index + delta):
-                if row < 0 or row >= total:
-                    continue
-                actual_idx = self.page_order[row] if self.page_order else row
-                quality = self._effective_render_quality(actual_idx, self.zoom_factor)
-                key = self._cache_key(actual_idx, self.zoom_factor, quality)
-                if self._cache_get_image(key) is None:
-                    self._request_render(key, priority=1)
+        first = max(0, center_row_index - span)
+        last = min(total - 1, center_row_index + span)
+        if self.view_mode == "continuous" and self.continuous_view.page_count():
+            y = self.page_scroll.verticalScrollBar().value()
+            first = min(first, self.continuous_view.page_at_offset(y))
+            last = max(last, self.continuous_view.page_at_offset(y + self.page_scroll.viewport().height()))
+        keys = []
+        for row in range(first, last + 1):
+            actual = self.page_order[row] if self.page_order else row
+            keys.append(self._cache_key(actual, self.zoom_factor, self._effective_render_quality(actual, self.zoom_factor)))
+        self.renderer.retain(keys)
+        current = self.page_order[center_row_index] if self.page_order else center_row_index
+        self._get_or_request_page_image(current, self.zoom_factor)
+        for key in keys:
+            if key[1] != current and self._cache_get_image(key) is None:
+                self._request_render(key, priority=1)
 
     def _thumbnail_key(self, actual_idx: int) -> tuple[str, int, float, float]:
         return self._cache_key(actual_idx, self._thumb_zoom, self._thumb_quality)
@@ -3557,7 +3570,7 @@ class PdfUltimateMainWindow(QMainWindow):
         actual_idx = self.page_order[self.current_page_index] if self.page_order else self.current_page_index
         page = self.current_doc.load_page(actual_idx)
         rect = page.rect
-        self.zoom_factor = max(0.2, min(6.0, min(viewport_width / rect.width, viewport_height / rect.height)))
+        self.zoom_factor = max(0.001, min(6.0, min(viewport_width / rect.width, viewport_height / rect.height)))
         self._refresh_view()
         self._schedule_state_save()
 
@@ -3569,7 +3582,7 @@ class PdfUltimateMainWindow(QMainWindow):
         actual_idx = self.page_order[self.current_page_index] if self.page_order else self.current_page_index
         page = self.current_doc.load_page(actual_idx)
         rect = page.rect
-        self.zoom_factor = max(0.2, min(6.0, viewport_width / rect.width))
+        self.zoom_factor = max(0.001, min(6.0, viewport_width / rect.width))
         self._refresh_view()
         self._schedule_state_save()
 
@@ -3585,13 +3598,9 @@ class PdfUltimateMainWindow(QMainWindow):
         dpr = max(1.0, float(self.devicePixelRatioF()))
         if self.view_mode == "continuous":
             base = max(1.2, min(2.1, dpr * 1.35))
-            min_quality = 1.0
-            max_pixels = 14_000_000.0
         else:
             # Keep single-page mode crisp while respecting memory limits.
             base = max(2.0, min(3.2, dpr * 2.1))
-            min_quality = 1.2
-            max_pixels = 24_000_000.0
 
         if self.current_doc is None or page_index is None:
             return base
@@ -3812,6 +3821,13 @@ class PdfUltimateMainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._closing = True  # type: ignore[override]
+        self._cancel_ocr()
+        killer = getattr(self, "_ocr_killer", None)
+        if killer is not None and killer.state() != QProcess.NotRunning:
+            killer.waitForFinished(2000)
+        if self._ocr_process is not None:
+            self._ocr_process.kill()
+            self._ocr_process.waitForFinished(1000)
         for service in (self.tool_jobs, self.search_jobs, self.text_jobs):
             service.cancel()
             if service._process is not None:
@@ -4185,12 +4201,19 @@ class PdfUltimateMainWindow(QMainWindow):
             self._show_error(exc)
 
     def _submit_tool(self, operation, *args, message="Operation complete.", callback=None, **kwargs):
-        self.tool_jobs.start(operation, list(args), kwargs)
+        if self.tool_jobs.busy:
+            raise PdfToolkitError("An operation is already running. Cancel it or wait for it to finish.")
         self._tool_message = message
         self._tool_callback = callback
         self.tools_stack.setEnabled(False)
         self.job_cancel_button.show()
         self.statusBar().showMessage("Working... You can continue reading.")
+        try:
+            self.tool_jobs.start(operation, list(args), kwargs)
+        except Exception:
+            self._reset_tool_controls()
+            self._tool_callback = None
+            raise
 
     def _tool_progress(self, progress):
         self.statusBar().showMessage(progress.get("message", "Working..."))

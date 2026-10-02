@@ -31,7 +31,7 @@ jobs:
       - name: Build the portable package
         shell: pwsh
         run: ./scripts/build_portable.ps1 -SkipInstall
-      - name: Test automatic Start menu registration
+      - name: Run reader regression suite
         shell: pwsh
         run: |
           $testOutput = & .\.venv\Scripts\python.exe -m unittest discover -s tests -v 2>&1
@@ -40,8 +40,26 @@ jobs:
           if ($testCode -ne 0) {
             $detail = ($testOutput -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
             Write-Host "::error::$detail"
-            throw 'Start menu registration tests failed.'
+            throw 'Reader regression tests failed.'
           }
+      - name: Smoke test frozen reader and workers
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          import fitz, subprocess, json
+          root = Path('runtime_data/ci-smoke'); root.mkdir(parents=True, exist_ok=True)
+          pdf = root / 'needle.pdf'
+          with fitz.open() as doc:
+              for i in range(10): doc.new_page().insert_text((60, 60), f'needle page {i}')
+              doc.save(pdf)
+          exe = Path('release/PDFUltimate-portable/PDFUltimate.exe').resolve()
+          subprocess.run([str(exe), '--smoke-test', str(pdf.resolve()), str((root / 'result').resolve())], check=True, timeout=60)
+          report = json.loads((root / 'result/report.json').read_text())
+          assert report['passed'] and report['frozen'], report
+          print(report)
+          '@ | .\.venv\Scripts\python.exe -
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen reader smoke test failed.' }
       - name: Verify archive, icon and application startup
         shell: pwsh
         run: |

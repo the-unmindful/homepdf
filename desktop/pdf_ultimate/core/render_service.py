@@ -32,6 +32,10 @@ class PdfRenderService(QObject):
         for future in list(self._active):
             future.cancel()
 
+    def retain(self, keys):
+        wanted = set(keys)
+        self._pending = OrderedDict((key, job) for key, job in self._pending.items() if key in wanted or job[0] == 2)
+
     def queue_render(self, *, key, pdf_path: Path, page_index, zoom, quality, priority=0):
         if any(job[0] == key and job[1] == self._generation for job in self._active.values()):
             return

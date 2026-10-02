@@ -30,6 +30,11 @@ class RenderingTests(unittest.TestCase):
             result = worker_tasks.render_page_pixels(str(path), 0, 6, 3.2)
             self.assertLessEqual(result.width * result.height, 12_000_000)
             self.assertEqual(len(result.samples), result.stride * result.height)
+    def test_extreme_geometry_cannot_override_pixel_cap(self):
+        import math
+        scale = worker_tasks.bounded_scale(100_000_000, 100_000_000, 6)
+        self.assertLessEqual((math.ceil(100_000_000 * scale) + 2) ** 2, 12_000_000)
+
     def service(self):
         executor = Executor()
         with patch("pdf_ultimate.core.render_service.get_process_pool", return_value=executor):
@@ -45,6 +50,15 @@ class RenderingTests(unittest.TestCase):
         self.assertLessEqual(service.pending_count, 24)
         executor.calls[0][0].set_result(None); self.app.processEvents()
         self.assertEqual(executor.calls[2][1][1], 999)
+    def test_scrolling_drops_offscreen_pending_work(self):
+        service, executor = self.service()
+        for i in range(12): self.queue(service, i, 0)
+        keep = {('doc', 10, 1., 1.), ('doc', 11, 1., 1.)}
+        service.retain(keep)
+        self.assertEqual(service.pending_count, 2)
+        executor.calls[0][0].set_result(None); self.app.processEvents()
+        self.assertEqual(executor.calls[2][1][1], 10)
+
     def test_obsolete_generation_never_emits_image(self):
         service, executor = self.service(); delivered = []
         service.rendered.connect(lambda *args: delivered.append(args))

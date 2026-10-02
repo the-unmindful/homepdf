@@ -79,7 +79,7 @@ class ContinuousPageView(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        painter.fillRect(event.rect(), QColor("#edf3fb"))
+        painter.fillRect(event.rect(), QColor("#e9eeeb"))
 
         if not self._page_rects:
             painter.end()
@@ -94,7 +94,7 @@ class ContinuousPageView(QWidget):
             if not rect.intersects(visible):
                 continue
             page_index = self._page_indices[row]
-            painter.fillRect(rect.adjusted(-2, -2, 2, 2), QColor("#dce6f5"))
+            painter.fillRect(rect.adjusted(-2, -2, 2, 2), QColor("#d1dcd5"))
             painter.fillRect(rect, QColor("#ffffff"))
 
             image = self._image_provider(page_index, self._zoom)

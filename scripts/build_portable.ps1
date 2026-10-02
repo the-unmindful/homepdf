@@ -1,5 +1,6 @@
-﻿param(
-  [switch]$SkipInstall
+param(
+  [switch]$SkipInstall,
+  [string]$PythonPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,7 +12,8 @@ $pythonCandidates = @(
   '.venv\Scripts\python.exe'
 )
 
-$python = $pythonCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+$python = $PythonPath
+if (-not $python) { $python = $pythonCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1 }
 if (-not $python) {
   throw 'No local virtual environment found. Create one with: python -m venv venv'
 }
@@ -30,8 +32,12 @@ $pyiArgs = @(
   '--workpath', $workPath,
   '--distpath', $distPath,
   '--name', 'PDFUltimate',
+  '--exclude-module', 'numpy',
+  '--exclude-module', 'PIL',
+  '--exclude-module', 'tkinter',
+  '--exclude-module', 'matplotlib',
+  '--exclude-module', 'IPython',
   '--collect-all', 'fitz',
-  '--collect-all', 'pypdf',
   '--collect-all', 'docx'
 )
 if (Test-Path $iconPath) {

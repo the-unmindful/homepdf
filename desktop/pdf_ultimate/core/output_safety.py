@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from functools import wraps
+import errno
 import inspect
 import os
 from pathlib import Path
@@ -33,6 +34,22 @@ def publish_file(staged: Path, destination: Path) -> Path:
             return target
         except FileExistsError:
             continue
+        except OSError as exc:
+            if exc.errno != errno.EXDEV and getattr(exc, 'winerror', None) != 17:
+                raise
+            # Publish atomically even when the worker workspace is on another drive.
+            fd, name = tempfile.mkstemp(prefix='.homepdf-', dir=destination.parent)
+            os.close(fd)
+            copied = Path(name)
+            try:
+                shutil.copyfile(staged, copied)
+                with copied.open('rb') as handle:
+                    os.fsync(handle.fileno())
+                result = publish_file(copied, destination)
+                staged.unlink()
+                return result
+            finally:
+                copied.unlink(missing_ok=True)
 
 
 def safe_outputs(method):
@@ -48,12 +65,15 @@ def safe_outputs(method):
         staging = Path(tempfile.mkdtemp(prefix='.homepdf-', dir=destination.parent))
         private = staging / destination.name if parameter == 'output_path' else staging
         bound.arguments[parameter] = private
+        published = []
         try:
             result = method(*bound.args, **bound.kwargs)
             def publish(path):
                 path = Path(path)
                 target = destination if parameter == 'output_path' else destination / path.relative_to(staging)
-                return publish_file(path, target)
+                actual = publish_file(path, target)
+                published.append(actual)
+                return actual
             if isinstance(result, Path):
                 return publish(result)
             if isinstance(result, list):
@@ -61,6 +81,10 @@ def safe_outputs(method):
             # ConversionResult: preserve its public result shape.
             result.outputs = [publish(path) for path in result.outputs]
             return result
+        except Exception:
+            for path in published:
+                path.unlink(missing_ok=True)
+            raise
         finally:
             shutil.rmtree(staging, ignore_errors=True)
     return wrapped

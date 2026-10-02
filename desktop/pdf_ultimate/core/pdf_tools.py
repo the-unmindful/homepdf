@@ -11,7 +11,7 @@ from typing import Iterable
 import fitz
 
 from .models import ConversionResult, PdfInfo
-from .output_safety import safe_outputs
+from .output_safety import safe_outputs, unique_path
 from .page_ranges import parse_page_selection, parse_split_ranges
 
 
@@ -48,78 +48,58 @@ class PdfToolkit:
 
     @safe_outputs
     def merge(self, pdf_paths: Iterable[Path], output_path: Path) -> Path:
-        from pypdf import PdfReader, PdfWriter
-        paths = [Path(p).resolve() for p in pdf_paths]
+        paths = [Path(path).resolve() for path in pdf_paths]
         if len(paths) < 2:
             raise PdfToolkitError("Choose at least two PDF files to merge.")
-
-        writer = PdfWriter()
-        for path in paths:
-            reader = PdfReader(str(path))
-            if reader.is_encrypted:
-                raise PdfToolkitError(f"'{path.name}' is encrypted. Unlock it first.")
-            for page in reader.pages:
-                writer.add_page(page)
-
-        output_path = output_path.resolve()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with output_path.open("wb") as handle:
-            writer.write(handle)
+        with fitz.open() as merged:
+            outlines = []
+            for index, path in enumerate(paths):
+                with fitz.open(path) as source:
+                    if source.needs_pass:
+                        raise PdfToolkitError(f"'{path.name}' is encrypted. Unlock it first.")
+                    offset = merged.page_count
+                    merged.insert_pdf(source, links=True, annots=True, widgets=True, join_duplicates=False)
+                    if index == 0:
+                        merged.set_metadata(source.metadata)
+                    for level, title, page, details in source.get_toc(False):
+                        details = dict(details)
+                        if details.get('kind') == fitz.LINK_GOTO:
+                            page += offset
+                            details['page'] += offset
+                        outlines.append([level, title, page, details])
+                self.progress_callback(index + 1, len(paths))
+            merged.set_toc(outlines)
+            merged.save(output_path, garbage=3, deflate=True)
         return output_path
 
     @safe_outputs
     def split_by_ranges(self, pdf_path: Path, range_text: str, output_dir: Path) -> list[Path]:
-        from pypdf import PdfReader, PdfWriter
-        source = Path(pdf_path).resolve()
-        reader = PdfReader(str(source))
-        if reader.is_encrypted:
-            raise PdfToolkitError("Encrypted PDFs must be unlocked before split.")
-        ranges = parse_split_ranges(range_text, len(reader.pages))
-
-        output_dir = output_dir.resolve()
+        with fitz.open(pdf_path) as doc:
+            if doc.needs_pass:
+                raise PdfToolkitError("Unlock this PDF before splitting it.")
+            ranges = parse_split_ranges(range_text, doc.page_count)
         output_dir.mkdir(parents=True, exist_ok=True)
-
-        outputs: list[Path] = []
-        base = source.stem
-        for start, end in ranges:
-            writer = PdfWriter()
-            for index in range(start, end + 1):
-                writer.add_page(reader.pages[index])
-            name = f"{base}_pages_{start + 1}-{end + 1}.pdf"
-            out = output_dir / name
-            with out.open("wb") as handle:
-                writer.write(handle)
-            outputs.append(out)
+        outputs = []
+        for part, (start, end) in enumerate(ranges, 1):
+            path = unique_path(output_dir / f"{pdf_path.stem}_pages_{start + 1}-{end + 1}.pdf")
+            outputs.append(self._select_pages(pdf_path, list(range(start, end + 1)), path))
+            self.progress_callback(part, len(ranges))
         return outputs
 
     @safe_outputs
     def split_every(self, pdf_path: Path, pages_per_file: int, output_dir: Path) -> list[Path]:
-        from pypdf import PdfReader, PdfWriter
         if pages_per_file < 1:
             raise PdfToolkitError("Pages per split file must be at least 1.")
-
-        source = Path(pdf_path).resolve()
-        reader = PdfReader(str(source))
-        if reader.is_encrypted:
-            raise PdfToolkitError("Encrypted PDFs must be unlocked before split.")
-
-        output_dir = output_dir.resolve()
+        with fitz.open(pdf_path) as doc:
+            if doc.needs_pass:
+                raise PdfToolkitError("Unlock this PDF before splitting it.")
+            total = doc.page_count
         output_dir.mkdir(parents=True, exist_ok=True)
-
-        outputs: list[Path] = []
-        base = source.stem
-        total = len(reader.pages)
-        part = 1
-        for start in range(0, total, pages_per_file):
-            end = min(start + pages_per_file, total)
-            writer = PdfWriter()
-            for index in range(start, end):
-                writer.add_page(reader.pages[index])
-            out = output_dir / f"{base}_part_{part:03d}.pdf"
-            with out.open("wb") as handle:
-                writer.write(handle)
-            outputs.append(out)
-            part += 1
+        outputs = []
+        for part, start in enumerate(range(0, total, pages_per_file), 1):
+            path = output_dir / f"{pdf_path.stem}_part_{part:03d}.pdf"
+            outputs.append(self._select_pages(pdf_path, list(range(start, min(start + pages_per_file, total))), path))
+            self.progress_callback(min(start + pages_per_file, total), total)
         return outputs
 
     def _select_pages(self, source: Path, order: list[int], output_path: Path) -> Path:
@@ -128,7 +108,7 @@ class PdfToolkit:
                 raise PdfToolkitError("Unlock this PDF before changing pages.")
             if not order:
                 raise PdfToolkitError("PDF must retain at least one page.")
-            toc = doc.get_toc()
+            toc = doc.get_toc(False)
             first_destination = {}
             seen_pages = set()
             independent_order = []
@@ -144,12 +124,16 @@ class PdfToolkit:
                     seen_pages.add(old_index)
             doc.select(independent_order)
             mapped = []
-            for level, title, page_number in toc:
-                target = first_destination.get(page_number - 1)
-                if target is not None:
-                    # A removed parent cannot leave an invalid level jump.
-                    level = min(level, (mapped[-1][0] + 1) if mapped else 1)
-                    mapped.append([level, title, target + 1])
+            for level, title, page_number, details in toc:
+                details = dict(details)
+                if details.get('kind') == fitz.LINK_GOTO:
+                    target = first_destination.get(details.get('page', page_number - 1))
+                    if target is None:
+                        continue
+                    page_number = target + 1
+                    details['page'] = target
+                level = min(level, (mapped[-1][0] + 1) if mapped else 1)
+                mapped.append([level, title, page_number, details])
             doc.set_toc(mapped)
             doc.save(str(output_path), garbage=3, deflate=True)
         return output_path
@@ -485,6 +469,7 @@ class PdfToolkit:
         if target == "json":
             pages_payload: list[dict[str, object]] = []
             for idx, page in enumerate(doc, start=1):
+                self.progress_callback(idx, doc.page_count)
                 blocks = page.get_text("blocks")
                 normalized_blocks: list[dict[str, object]] = []
                 for block in blocks:
@@ -523,6 +508,7 @@ class PdfToolkit:
         if target == "html":
             pages: list[str] = []
             for idx, page in enumerate(doc, start=1):
+                self.progress_callback(idx, doc.page_count)
                 body = page.get_text("html")
                 pages.append(f"<section><h2>Page {idx}</h2>{body}</section>")
             html = (
@@ -543,6 +529,7 @@ class PdfToolkit:
             document = Document()
             document.add_heading(source.stem, level=1)
             for idx, page in enumerate(doc, start=1):
+                self.progress_callback(idx, doc.page_count)
                 document.add_heading(f"Page {idx}", level=2)
                 text = self._clean_page_text(page.get_text("text"))
                 document.add_paragraph(text if text else "[No text detected on this page]")
@@ -554,6 +541,7 @@ class PdfToolkit:
         if target in {"png", "jpg"}:
             outputs: list[Path] = []
             for idx, page in enumerate(doc, start=1):
+                self.progress_callback(idx, doc.page_count)
                 pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
                 ext = "jpg" if target == "jpg" else "png"
                 out = output_dir / f"{source.stem}_page_{idx:03d}.{ext}"
@@ -575,7 +563,8 @@ class PdfToolkit:
 
         out_doc = fitz.open()
         try:
-            for source in sources:
+            for source_index, source in enumerate(sources, 1):
+                self.progress_callback(source_index, len(sources))
                 if not source.exists():
                     raise PdfToolkitError(f"File not found: {source}")
                 suffix = source.suffix.lower()
@@ -641,6 +630,7 @@ class PdfToolkit:
         pages: list[str] = []
         try:
             for page_number, page in enumerate(doc, start=1):
+                self.progress_callback(page_number, doc.page_count)
                 blocks = page.get_text("blocks")
                 block_texts: list[str] = []
                 for block in sorted(blocks, key=lambda item: (item[1], item[0])):

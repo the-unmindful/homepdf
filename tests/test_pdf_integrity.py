@@ -101,6 +101,59 @@ class PdfIntegrityTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "RTF"):
             self.toolkit.convert_to_pdf([rtf], self.source.parent / 'rtf.pdf')
 
+    def test_split_preserves_metadata_outline_and_removes_omitted_links(self):
+        outputs = self.toolkit.split_every(self.source, 1, self.root / 'split-fidelity')
+        self.assert_properties(outputs[0], [[1, 'First', 1]])
+        with fitz.open(outputs[0]) as doc:
+            self.assertEqual(doc[0].get_links(), [])
+            self.assertEqual(next(doc[0].widgets()).field_value, 'Alice')
+        self.assert_properties(outputs[2], [[1, 'Last', 1]])
+
+    def test_detailed_bookmarks_retain_destinations_styles_and_external_links(self):
+        modified = self.root / 'detailed.pdf'
+        with fitz.open(self.source) as doc:
+            doc.set_toc([[1, 'Position', 1, {'kind': fitz.LINK_GOTO, 'page': 0, 'to': fitz.Point(40, 600), 'zoom': 2., 'bold': True}],
+                         [1, 'Web', -1, {'kind': fitz.LINK_URI, 'uri': 'https://example.com'}]])
+            doc.save(modified)
+        output = self.toolkit.reorder_pages(modified, '3,1,2', self.root / 'detail-out.pdf')
+        with fitz.open(output) as doc:
+            toc = doc.get_toc(False)
+            self.assertEqual(len(toc), 2)
+            self.assertEqual(toc[0][3]['page'], 1)
+            self.assertEqual(toc[0][3]['to'], fitz.Point(40, 600))
+            self.assertEqual(toc[0][3]['zoom'], 2.)
+            self.assertTrue(toc[0][3]['bold'])
+            self.assertEqual(toc[1][3]['uri'], 'https://example.com')
+
+    def test_merge_retains_outlines_forms_links_and_first_metadata(self):
+        output = self.toolkit.merge([self.source, self.source], self.root / 'merge.pdf')
+        self.assert_properties(output, [[1, 'First', 1], [1, 'Last', 3], [1, 'First', 4], [1, 'Last', 6]])
+        with fitz.open(output) as doc:
+            self.assertEqual(next(doc[0].widgets()).field_value, 'Alice')
+            self.assertEqual(next(doc[3].widgets()).field_value, 'Alice')
+            self.assertEqual(doc[3].get_links()[0]['page'], 5)
+
+    def test_repeated_split_ranges_create_distinct_results(self):
+        outputs = self.toolkit.split_by_ranges(self.source, '1-2,1-2', self.root / 'repeated')
+        self.assertEqual(len(set(outputs)), 2)
+        for output in outputs:
+            with fitz.open(output) as doc: self.assertEqual(doc.page_count, 2)
+
+    def test_publication_failure_rolls_back_only_new_files(self):
+        from unittest.mock import patch
+        from pdf_ultimate.core.output_safety import publish_file
+        calls = []
+        def fail_second(staged, destination):
+            if calls: raise OSError('Simulated publication failure')
+            calls.append(1)
+            return publish_file(staged, destination)
+        folder = self.root / 'rollback'; folder.mkdir()
+        sentinel = folder / 'previous.pdf'; sentinel.write_bytes(b'Keep me')
+        with patch('pdf_ultimate.core.output_safety.publish_file', side_effect=fail_second):
+            with self.assertRaisesRegex(OSError, 'publication failure'):
+                self.toolkit.split_every(self.source, 1, folder)
+        self.assertEqual(list(folder.iterdir()), [sentinel])
+
     def test_default_names_are_distinct_even_in_same_second(self):
         self.assertNotEqual(self.toolkit.default_output_path(self.source, 'rotate'),
                             self.toolkit.default_output_path(self.source, 'rotate'))
