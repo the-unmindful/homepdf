@@ -1427,26 +1427,29 @@ class PdfUltimateMainWindow(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setSpacing(8)
+        self.ocr_advanced = QWidget()
+        advanced_layout = QVBoxLayout(self.ocr_advanced)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
+        self.ocr_advanced.hide()
 
         info = QLabel(
-            "OCR (Local): This uses the rebuilt GLM-OCR sub-tool in this workspace by default. "
-            "You can OCR the current PDF, a folder of images, one PDF in a folder, or all PDFs in a folder."
+            "Local OCR requires the separate GLM-OCR runtime and a compatible NVIDIA GPU. Choose a source and output format; progress appears below."
         )
         info.setWordWrap(True)
         layout.addWidget(info)
 
-        layout.addWidget(QLabel("OCR Command"))
-        cmd_row = QHBoxLayout()
+        advanced_layout.addWidget(QLabel("OCR Command"))
+        cmd_row = QVBoxLayout()
         self.ocr_command_input = QLineEdit(self._default_ocr_command())
         self.ocr_command_input.setPlaceholderText(r"e.g. E:\Wisdom-app\Tools\Home_PDF\scripts\ocr.bat")
         pick_cmd_btn = QPushButton("Browse")
         pick_cmd_btn.clicked.connect(self._pick_ocr_command)
         cmd_row.addWidget(self.ocr_command_input)
         cmd_row.addWidget(pick_cmd_btn)
-        layout.addLayout(cmd_row)
+        advanced_layout.addLayout(cmd_row)
 
         layout.addWidget(QLabel("Source / PDF Mode"))
-        source_row = QHBoxLayout()
+        source_row = QVBoxLayout()
         self.ocr_source_combo = QComboBox()
         self.ocr_source_combo.addItem("Current PDF", "current_pdf")
         self.ocr_source_combo.addItem("Folder Auto", "auto_folder")
@@ -1460,8 +1463,8 @@ class PdfUltimateMainWindow(QMainWindow):
         self.ocr_pdf_mode_combo.addItems(["pages", "direct"])
         self.ocr_pdf_mode_combo.setCurrentText(str(self.state_store.get_ui("ocr_pdf_mode", "pages")))
         source_row.addWidget(self.ocr_source_combo, 2)
-        source_row.addWidget(QLabel("PDF Mode"))
-        source_row.addWidget(self.ocr_pdf_mode_combo, 1)
+        advanced_layout.addWidget(QLabel("PDF mode"))
+        advanced_layout.addWidget(self.ocr_pdf_mode_combo)
         layout.addLayout(source_row)
 
         layout.addWidget(QLabel("Page Selection (PDF modes only; e.g. 2, 1-3, 5, 8-)"))
@@ -1470,7 +1473,7 @@ class PdfUltimateMainWindow(QMainWindow):
         layout.addWidget(self.ocr_pages_input)
 
         layout.addWidget(QLabel("Input Folder (used for folder modes)"))
-        input_row = QHBoxLayout()
+        input_row = QVBoxLayout()
         self.ocr_input_dir_input = QLineEdit(str(self.state_store.get_ui("ocr_input_dir", "")))
         self.ocr_input_dir_input.setPlaceholderText(r"e.g. E:\Scans")
         self.ocr_pick_input_btn = QPushButton("Browse")
@@ -1479,18 +1482,18 @@ class PdfUltimateMainWindow(QMainWindow):
         input_row.addWidget(self.ocr_pick_input_btn)
         layout.addLayout(input_row)
 
-        layout.addWidget(QLabel("Poppler bin folder (optional, only needed if pdf2image can't find Poppler)"))
-        poppler_row = QHBoxLayout()
+        advanced_layout.addWidget(QLabel("Poppler bin folder (optional, only needed if pdf2image can't find Poppler)"))
+        poppler_row = QVBoxLayout()
         self.ocr_poppler_input = QLineEdit(str(self.state_store.get_ui("ocr_poppler_path", "")))
         self.ocr_poppler_input.setPlaceholderText(r"e.g. C:\poppler\Library\bin")
         pick_poppler_btn = QPushButton("Browse")
         pick_poppler_btn.clicked.connect(self._pick_poppler_path)
         poppler_row.addWidget(self.ocr_poppler_input)
         poppler_row.addWidget(pick_poppler_btn)
-        layout.addLayout(poppler_row)
+        advanced_layout.addLayout(poppler_row)
 
-        layout.addWidget(QLabel("Task / Output Format / Processor"))
-        task_row = QHBoxLayout()
+        layout.addWidget(QLabel("Task / Output format"))
+        task_row = QVBoxLayout()
         self.ocr_task_combo = QComboBox()
         self.ocr_task_combo.addItems(["text", "table", "formula", "extract", "custom"])
         self.ocr_task_combo.setCurrentText(str(self.state_store.get_ui("ocr_task", "text")))
@@ -1505,12 +1508,12 @@ class PdfUltimateMainWindow(QMainWindow):
         self.ocr_use_fast_combo.setCurrentText(stored_use_fast)
         task_row.addWidget(self.ocr_task_combo)
         task_row.addWidget(self.ocr_format_combo)
-        task_row.addWidget(QLabel("use_fast"))
-        task_row.addWidget(self.ocr_use_fast_combo)
+        advanced_layout.addWidget(QLabel("Fast processor"))
+        advanced_layout.addWidget(self.ocr_use_fast_combo)
         layout.addLayout(task_row)
 
-        layout.addWidget(QLabel("Model / Job Name"))
-        model_row = QHBoxLayout()
+        advanced_layout.addWidget(QLabel("Model / Job Name"))
+        model_row = QVBoxLayout()
         self.ocr_model_input = QLineEdit(str(self.state_store.get_ui("ocr_model", "zai-org/GLM-OCR")))
         self.ocr_model_input.setPlaceholderText("zai-org/GLM-OCR")
         self.ocr_job_name_input = QLineEdit(str(self.state_store.get_ui("ocr_job_name", "")))
@@ -1518,27 +1521,27 @@ class PdfUltimateMainWindow(QMainWindow):
         model_row.addWidget(self.ocr_model_input, 2)
         model_row.addWidget(QLabel("Job"))
         model_row.addWidget(self.ocr_job_name_input, 1)
-        layout.addLayout(model_row)
+        advanced_layout.addLayout(model_row)
 
-        layout.addWidget(QLabel("Custom Prompt (used for task=custom)"))
+        advanced_layout.addWidget(QLabel("Custom Prompt (used for task=custom)"))
         self.ocr_custom_prompt_edit = QTextEdit()
         self.ocr_custom_prompt_edit.setMinimumHeight(72)
         self.ocr_custom_prompt_edit.setPlaceholderText("Only used when task is custom.")
         self.ocr_custom_prompt_edit.setPlainText(str(self.state_store.get_ui("ocr_custom_prompt", "")))
-        layout.addWidget(self.ocr_custom_prompt_edit)
+        advanced_layout.addWidget(self.ocr_custom_prompt_edit)
 
-        layout.addWidget(QLabel("Schema / Instructions File (used for task=extract)"))
-        schema_row = QHBoxLayout()
+        advanced_layout.addWidget(QLabel("Schema / Instructions File (used for task=extract)"))
+        schema_row = QVBoxLayout()
         self.ocr_schema_input = QLineEdit(str(self.state_store.get_ui("ocr_schema", "")))
         self.ocr_schema_input.setPlaceholderText(r"e.g. .\ocr_tool\schemas\example_extract_schema.txt")
         self.ocr_pick_schema_btn = QPushButton("Browse")
         self.ocr_pick_schema_btn.clicked.connect(self._pick_ocr_schema)
         schema_row.addWidget(self.ocr_schema_input)
         schema_row.addWidget(self.ocr_pick_schema_btn)
-        layout.addLayout(schema_row)
+        advanced_layout.addLayout(schema_row)
 
-        layout.addWidget(QLabel("PDF Rendering (OCR side)"))
-        perf_row = QHBoxLayout()
+        advanced_layout.addWidget(QLabel("PDF Rendering (OCR side)"))
+        perf_row = QVBoxLayout()
         self.ocr_dpi_spin = QSpinBox()
         self.ocr_dpi_spin.setRange(72, 600)
         self.ocr_dpi_spin.setValue(int(self.state_store.get_ui("ocr_dpi", 200)))
@@ -1554,10 +1557,10 @@ class PdfUltimateMainWindow(QMainWindow):
         perf_row.addWidget(self.ocr_batch_pages_spin)
         perf_row.addWidget(QLabel("Max Pages"))
         perf_row.addWidget(self.ocr_max_pages_spin)
-        layout.addLayout(perf_row)
+        advanced_layout.addLayout(perf_row)
 
-        layout.addWidget(QLabel("Image / Generation Options"))
-        options_row = QHBoxLayout()
+        advanced_layout.addWidget(QLabel("Image / Generation Options"))
+        options_row = QVBoxLayout()
         self.ocr_max_side_spin = QSpinBox()
         self.ocr_max_side_spin.setRange(0, 6000)
         self.ocr_max_side_spin.setValue(int(self.state_store.get_ui("ocr_max_side", 1800)))
@@ -1569,9 +1572,9 @@ class PdfUltimateMainWindow(QMainWindow):
         options_row.addWidget(self.ocr_max_side_spin)
         options_row.addWidget(QLabel("Max Tokens"))
         options_row.addWidget(self.ocr_max_new_tokens_spin)
-        layout.addLayout(options_row)
+        advanced_layout.addLayout(options_row)
 
-        toggle_row = QHBoxLayout()
+        toggle_row = QVBoxLayout()
         self.ocr_per_page_box = QCheckBox("Per-page files")
         self.ocr_per_page_box.setChecked(bool(self.state_store.get_ui("ocr_per_page_files", False)))
         self.ocr_force_fp16_box = QCheckBox("Force fp16")
@@ -1579,27 +1582,39 @@ class PdfUltimateMainWindow(QMainWindow):
         self.ocr_trust_remote_code_box = QCheckBox("Trust remote code")
         self.ocr_trust_remote_code_box.setChecked(bool(self.state_store.get_ui("ocr_trust_remote_code", False)))
         self.ocr_live_terminal_box = QCheckBox("Live terminal")
-        self.ocr_live_terminal_box.setChecked(bool(self.state_store.get_ui("ocr_live_terminal", True)))
+        self.ocr_live_terminal_box.setChecked(bool(False))
         toggle_row.addWidget(self.ocr_per_page_box)
         toggle_row.addWidget(self.ocr_force_fp16_box)
         toggle_row.addWidget(self.ocr_trust_remote_code_box)
-        toggle_row.addWidget(self.ocr_live_terminal_box)
+        self.ocr_live_terminal_box.hide()
         toggle_row.addStretch(1)
-        layout.addLayout(toggle_row)
+        advanced_layout.addLayout(toggle_row)
 
-        btn_row = QHBoxLayout()
-        run_btn = QPushButton("Run OCR Job")
+        btn_row = QVBoxLayout()
+        advanced_button = QPushButton("Advanced settings")
+        advanced_button.setCheckable(True)
+        advanced_button.toggled.connect(self.ocr_advanced.setVisible)
+        layout.addWidget(advanced_button)
+        layout.addWidget(self.ocr_advanced)
+        self.ocr_run_button = QPushButton("Run OCR")
+        self.ocr_run_button.setProperty("primary", True)
+        run_btn = self.ocr_run_button
         run_btn.clicked.connect(self._run_ocr_job)
         self.ocr_open_output_btn = QPushButton("Open OCR Output Folder")
         self.ocr_open_output_btn.setEnabled(False)
         self.ocr_open_output_btn.clicked.connect(self._open_last_ocr_output_folder)
+        self.ocr_cancel_button = QPushButton("Cancel OCR")
+        self.ocr_cancel_button.setEnabled(False)
+        self.ocr_cancel_button.clicked.connect(self._cancel_ocr)
         btn_row.addWidget(run_btn)
-        btn_row.addWidget(self.ocr_open_output_btn)
+        btn_row.addWidget(self.ocr_cancel_button)
+        layout.addWidget(self.ocr_open_output_btn)
         layout.addLayout(btn_row)
 
         self.ocr_log_view = QTextEdit()
         self.ocr_log_view.setReadOnly(True)
-        self.ocr_log_view.setMinimumHeight(180)
+        self.ocr_log_view.setMinimumHeight(120)
+        self.ocr_log_view.document().setMaximumBlockCount(1000)
         self.ocr_log_view.setPlaceholderText("OCR log + preview will appear here…")
         layout.addWidget(self.ocr_log_view, 1)
         self.ocr_source_combo.currentIndexChanged.connect(self._sync_ocr_mode_fields)
@@ -1663,13 +1678,42 @@ class PdfUltimateMainWindow(QMainWindow):
         if not hasattr(self, "ocr_log_view"):
             return
         self.ocr_log_view.moveCursor(QTextCursor.End)
-        self.ocr_log_view.insertPlainText(text)
+        self.ocr_log_view.insertPlainText(text[-32_000:])
         self.ocr_log_view.moveCursor(QTextCursor.End)
+
+    def _set_ocr_busy(self, busy):
+        self.ocr_run_button.setEnabled(not busy)
+        self.ocr_cancel_button.setEnabled(busy)
+
+    def _cancel_ocr(self):
+        proc = self._ocr_process
+        if proc is None or proc.state() == QProcess.NotRunning:
+            return
+        self._ocr_cancel_requested = True
+        self.ocr_cancel_button.setEnabled(False)
+        self.statusBar().showMessage("Cancelling OCR...")
+        if os.name == "nt" and proc.processId():
+            killer = QProcess(self)
+            self._ocr_killer = killer
+            def release_killer(*_):
+                self._ocr_killer = None
+                killer.deleteLater()
+            killer.finished.connect(release_killer)
+            killer.start("taskkill.exe", ["/PID", str(proc.processId()), "/T", "/F"])
+        else:
+            proc.kill()
+
+    def _ocr_start_error(self, error):
+        if error == QProcess.FailedToStart:
+            message = self._ocr_process.errorString() if self._ocr_process else "Failed to start OCR"
+            self._reset_ocr_job_tracking()
+            self._show_error(PdfToolkitError(message))
 
     def _reset_ocr_job_tracking(self) -> None:
         self._ocr_process = None
         self._ocr_job_active = False
         self._ocr_completion_marker = None
+        self._set_ocr_busy(False)
         if self._ocr_completion_timer.isActive():
             self._ocr_completion_timer.stop()
 
@@ -1698,17 +1742,9 @@ class PdfUltimateMainWindow(QMainWindow):
             self._append_ocr_log(f"[WARNING] No OCR output files found in: {out_dir}\n")
             self._reset_ocr_job_tracking()
             if exit_code == 0:
-                QMessageBox.information(
-                    self,
-                    "OCR Complete",
-                    f"OCR finished.\n\nNo output file was detected yet.\n\nOutput folder:\n{out_dir}",
-                )
+                self.statusBar().showMessage(f"OCR finished.\n\nNo output file was detected yet.\n\nOutput folder:\n{out_dir}", 15000)
             else:
-                QMessageBox.warning(
-                    self,
-                    "OCR Failed",
-                    f"OCR finished with exit code {exit_code}.\n\nOutput folder:\n{out_dir}",
-                )
+                self.statusBar().showMessage(f"OCR finished with exit code {exit_code}.\n\nOutput folder:\n{out_dir}", 15000)
             return
 
         self._last_ocr_output_file = found_files[0]
@@ -1721,7 +1757,8 @@ class PdfUltimateMainWindow(QMainWindow):
 
         preview_file = found_files[0]
         try:
-            content = preview_file.read_text(encoding="utf-8", errors="replace")
+            with preview_file.open(encoding="utf-8", errors="replace") as preview:
+                content = preview.read(250_000)
             if len(content) > 40000:
                 content = content[:40000] + "\n\n...(truncated preview)...\n"
             self._append_ocr_log(f"\n[OCR OUTPUT PREVIEW] {preview_file.name}\n")
@@ -1731,17 +1768,9 @@ class PdfUltimateMainWindow(QMainWindow):
 
         self._reset_ocr_job_tracking()
         if exit_code == 0:
-            QMessageBox.information(
-                self,
-                "OCR Complete",
-                f"OCR finished successfully.\n\nOutput folder:\n{out_dir}",
-            )
+            self.statusBar().showMessage(f"OCR finished successfully.\n\nOutput folder:\n{out_dir}", 15000)
         else:
-            QMessageBox.warning(
-                self,
-                "OCR Finished With Errors",
-                f"OCR finished with exit code {exit_code}.\n\nOutput folder:\n{out_dir}",
-            )
+            self.statusBar().showMessage(f"OCR finished with exit code {exit_code}.\n\nOutput folder:\n{out_dir}", 15000)
 
     def _check_live_ocr_completion(self) -> None:
         marker = self._ocr_completion_marker
@@ -1760,136 +1789,8 @@ class PdfUltimateMainWindow(QMainWindow):
         self._complete_ocr_job(exit_code, source="live_terminal")
 
     def _run_ocr_on_current_pdf(self) -> None:
-        try:
-            source = self._require_current_pdf()
-
-            if self._ocr_process is not None and self._ocr_process.state() != QProcess.NotRunning:
-                raise PdfToolkitError("OCR is already running.")
-
-            command = (self.ocr_command_input.text() if hasattr(self, "ocr_command_input") else "").strip()
-            if not command:
-                raise PdfToolkitError("Set OCR Command first (see Readme.txt).")
-
-            task = self.ocr_task_combo.currentText() if hasattr(self, "ocr_task_combo") else "text"
-            fmt = self.ocr_format_combo.currentText() if hasattr(self, "ocr_format_combo") else "md"
-            dpi = int(self.ocr_dpi_spin.value()) if hasattr(self, "ocr_dpi_spin") else 200
-            max_pages = int(self.ocr_max_pages_spin.value()) if hasattr(self, "ocr_max_pages_spin") else 1500
-            poppler_path = (self.ocr_poppler_input.text() if hasattr(self, "ocr_poppler_input") else "").strip()
-
-            # Persist settings
-            self.state_store.set_ui("ocr_command", command)
-            self.state_store.set_ui("ocr_task", task)
-            self.state_store.set_ui("ocr_format", fmt)
-            self.state_store.set_ui("ocr_dpi", dpi)
-            self.state_store.set_ui("ocr_max_pages", max_pages)
-            self.state_store.set_ui("ocr_poppler_path", poppler_path)
-
-            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            run_dir = output_root() / f"{source.stem}_ocr_{stamp}"
-            input_dir = run_dir / "input"
-            output_dir = run_dir / "output"
-            input_dir.mkdir(parents=True, exist_ok=True)
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            # Copy the PDF into OCR input folder
-            target_pdf = input_dir / source.name
-            shutil.copy2(str(source), str(target_pdf))
-
-            job_name = f"{source.stem}_ocr_{stamp}"
-
-            args: list[str] = [
-                "--input_dir",
-                str(input_dir),
-                "--output_dir",
-                str(output_dir),
-                "--mode",
-                "pdf",
-                "--job_name",
-                job_name,
-                "--task",
-                task,
-                "--output_format",
-                fmt,
-                "--dpi",
-                str(dpi),
-                "--max_pages",
-                str(max_pages),
-            ]
-            if poppler_path:
-                args.extend(["--poppler_path", poppler_path])
-            launch_command, launch_args, launch_note = self._resolve_ocr_launch(command, args)
-
-            self._last_ocr_output_dir = output_dir
-            self._last_ocr_job_name = job_name
-            self._last_ocr_format = fmt
-            self._last_ocr_output_file = None
-            self.ocr_open_output_btn.setEnabled(False)
-
-            if hasattr(self, "ocr_log_view"):
-                self.ocr_log_view.clear()
-                self._append_ocr_log(f"[OCR] Source: {source}\n")
-                self._append_ocr_log(f"[OCR] Output: {output_dir}\n")
-                self._append_ocr_log(f"[OCR] Command: {launch_command}\n")
-                self._append_ocr_log(f"[OCR] Args: {' '.join(launch_args)}\n")
-                if launch_note:
-                    self._append_ocr_log(launch_note)
-                self._append_ocr_log("\n")
-
-            proc = QProcess(self)
-            proc_env = QProcessEnvironment.systemEnvironment()
-            proc_env.insert("PYTHONUNBUFFERED", "1")
-            proc_env.insert("PYTHONIOENCODING", "utf-8")
-            proc_env.insert("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
-            proc.setProcessEnvironment(proc_env)
-            proc.setProcessChannelMode(QProcess.SeparateChannels)
-            proc.readyReadStandardOutput.connect(lambda: self._append_ocr_log(bytes(proc.readAllStandardOutput()).decode("utf-8", errors="replace")))
-            proc.readyReadStandardError.connect(lambda: self._append_ocr_log(bytes(proc.readAllStandardError()).decode("utf-8", errors="replace")))
-            proc.finished.connect(self._on_ocr_finished)
-
-            # Windows: run bat/cmd via cmd.exe
-            suffix = Path(launch_command).suffix.lower()
-            if os.name == "nt" and (suffix in {".bat", ".cmd"} or suffix == ""):
-                cmd_part = launch_command
-                if " " in cmd_part and not cmd_part.startswith('"'):
-                    cmd_part = f'"{cmd_part}"'
-                proc.start("cmd.exe", ["/c", cmd_part, *launch_args])
-            else:
-                proc.start(launch_command, launch_args)
-
-            if not proc.waitForStarted(4000):
-                raise PdfToolkitError("Failed to start OCR process. Check OCR Command and PATH.")
-
-            self._ocr_process = proc
-            self.statusBar().showMessage("OCR running…")
-        except Exception as exc:
-            self._show_error(exc)
-
-    def _on_ocr_finished(self, exit_code: int, _exit_status) -> None:
-        self.statusBar().showMessage(f"OCR finished (exit code {exit_code}).")
-        proc = self._ocr_process
-        self._ocr_process = None
-
-        out_dir = self._last_ocr_output_dir
-        job_name = self._last_ocr_job_name
-        fmt = self._last_ocr_format
-        if not out_dir or not job_name or not fmt:
-            return
-
-        out_file = out_dir / f"{job_name}.{fmt}"
-        if out_file.exists():
-            self._last_ocr_output_file = out_file
-            self.ocr_open_output_btn.setEnabled(True)
-            try:
-                content = out_file.read_text(encoding="utf-8", errors="replace")
-                if len(content) > 40000:
-                    content = content[:40000] + "\n\n…(truncated preview)…\n"
-                self._append_ocr_log("\n\n[OCR OUTPUT PREVIEW]\n")
-                self._append_ocr_log(content)
-            except Exception as exc:
-                self._append_ocr_log(f"\n[WARNING] Could not read OCR output: {exc}\n")
-        else:
-            self.ocr_open_output_btn.setEnabled(bool(out_dir))
-            self._append_ocr_log(f"\n[WARNING] Expected output not found: {out_file}\n")
+        self.ocr_source_combo.setCurrentIndex(self.ocr_source_combo.findData("current_pdf"))
+        self._run_ocr_job()
 
     def _open_last_ocr_output_folder(self) -> None:
         if not self._last_ocr_output_dir:
@@ -2069,55 +1970,6 @@ class PdfUltimateMainWindow(QMainWindow):
             self._append_ocr_log(f"[OCR] Live terminal: {'on' if live_terminal else 'off'}\n\n")
 
             suffix = Path(launch_command).suffix.lower()
-            if live_terminal and os.name == "nt":
-                launcher_script = run_dir / "run_ocr_live.cmd"
-                completion_marker = run_dir / "ocr_live_exit_code.txt"
-                if suffix in {".bat", ".cmd"}:
-                    launch_line = "call " + subprocess.list2cmdline([launch_command, *launch_args])
-                elif suffix == ".ps1":
-                    launch_line = subprocess.list2cmdline(
-                        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", launch_command, *launch_args]
-                    )
-                else:
-                    launch_line = subprocess.list2cmdline([launch_command, *launch_args])
-
-                try:
-                    launcher_script.write_text(
-                        "\r\n".join(
-                            [
-                                "@echo off",
-                                "title HOME PDF OCR",
-                                f'cd /d "{Path.cwd()}"',
-                                "echo [OCR] Live terminal started.",
-                                launch_line,
-                                'set "EXIT_CODE=%ERRORLEVEL%"',
-                                f'> "{completion_marker}" echo %EXIT_CODE%',
-                                "echo.",
-                                "echo [OCR] Finished with exit code %EXIT_CODE%.",
-                                "pause",
-                                "exit /b %EXIT_CODE%",
-                                "",
-                            ]
-                        ),
-                        encoding="ascii",
-                    )
-                    os.startfile(str(launcher_script))
-                except OSError as exc:
-                    raise PdfToolkitError(f"Failed to open OCR terminal window: {exc}") from exc
-
-                self.ocr_open_output_btn.setEnabled(True)
-                self._ocr_job_active = True
-                self._ocr_completion_marker = completion_marker
-                self._ocr_completion_timer.start()
-                self._append_ocr_log("[OCR] Live terminal launched. Follow progress in that window.\n")
-                self._append_ocr_log(f"[OCR] Launcher: {launcher_script}\n")
-                self._append_ocr_log("[OCR] Output preview will be available after the job completes.\n")
-                self.statusBar().showMessage("OCR running in external terminal...")
-                return
-
-            if live_terminal and os.name != "nt":
-                self._append_ocr_log("[OCR] Live terminal is only supported on Windows; using in-app log instead.\n")
-
             proc = QProcess(self)
             proc.setProcessChannelMode(QProcess.SeparateChannels)
             proc.readyReadStandardOutput.connect(
@@ -2127,6 +1979,15 @@ class PdfUltimateMainWindow(QMainWindow):
                 lambda: self._append_ocr_log(bytes(proc.readAllStandardError()).decode("utf-8", errors="replace"))
             )
             proc.finished.connect(self._on_ocr_job_finished)
+            proc.errorOccurred.connect(self._ocr_start_error)
+            environment = QProcessEnvironment.systemEnvironment()
+            environment.insert("PYTHONUNBUFFERED", "1")
+            environment.insert("PYTHONIOENCODING", "utf-8")
+            proc.setProcessEnvironment(environment)
+            self._ocr_process = proc
+            self._ocr_job_active = True
+            self._ocr_cancel_requested = False
+            self._set_ocr_busy(True)
 
             if os.name == "nt" and suffix in {".bat", ".cmd"}:
                 cmd_part = launch_command
@@ -2138,17 +1999,20 @@ class PdfUltimateMainWindow(QMainWindow):
             else:
                 proc.start(launch_command, launch_args)
 
-            if not proc.waitForStarted(4000):
-                raise PdfToolkitError("Failed to start OCR process. Check OCR Command and PATH.")
-
-            self._ocr_process = proc
-            self._ocr_job_active = True
             self.statusBar().showMessage("OCR running...")
         except Exception as exc:
             self._reset_ocr_job_tracking()
             self._show_error(exc)
 
     def _on_ocr_job_finished(self, exit_code: int, _exit_status) -> None:
+        proc = self._ocr_process
+        if proc is not None:
+            proc.deleteLater()
+        if getattr(self, "_ocr_cancel_requested", False):
+            self._reset_ocr_job_tracking()
+            self._append_ocr_log("\n[OCR CANCELLED] Partial output may remain in the OCR output folder.\n")
+            self.statusBar().showMessage("OCR cancelled.")
+            return
         self._complete_ocr_job(exit_code, source="integrated")
 
     def _build_security_tab(self) -> QWidget:

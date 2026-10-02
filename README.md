@@ -120,3 +120,5 @@ Project source is covered by the repository's [MIT license](LICENSE). Third-part
 Tools run in cancellable local processes, with progress and safe publication of complete results. Reading stays responsive during exports. Existing files are never silently replaced. Use Open result or Show folder after an operation.
 
 The fresh layout gives reading most of the window. Pages and Outline share Navigation; Tools opens on demand. Fit Page works in both reader modes, and zoom keeps the current reading position. Ctrl+Tab / Ctrl+Shift+Tab switch documents; Ctrl+F finds text. Text preview is bounded to keep very large documents responsive; TXT export contains the full text.
+
+OCR tuning lives under Advanced settings. Progress stays in the app, Run is disabled during a job, and Cancel stops the owned Windows process tree. Cancelling OCR may leave partial OCR output for inspection.

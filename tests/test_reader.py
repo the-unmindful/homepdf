@@ -128,6 +128,18 @@ class ReaderTests(unittest.TestCase):
             dialog.assert_not_called()
         self.assertTrue(self.window.result_folder_button.isVisible())
 
+    def test_ocr_tuning_is_collapsed_and_logs_are_bounded(self):
+        self.assertTrue(self.window.ocr_advanced.isHidden())
+        self.assertFalse(self.window.ocr_live_terminal_box.isChecked())
+        self.window._append_ocr_log("line\n" * 3000)
+        self.assertLessEqual(self.window.ocr_log_view.document().blockCount(), 1000)
+        self.window._set_ocr_busy(True)
+        self.assertFalse(self.window.ocr_run_button.isEnabled())
+        self.assertTrue(self.window.ocr_cancel_button.isEnabled())
+        self.window._reset_ocr_job_tracking()
+        self.assertTrue(self.window.ocr_run_button.isEnabled())
+        self.assertFalse(self.window.ocr_cancel_button.isEnabled())
+
     def test_fit_page_fits_height_in_continuous_mode(self):
         self.open_reader()
         self.window.main_splitter.setSizes([0, 1300, 0])
