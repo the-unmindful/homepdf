@@ -1,0 +1,202 @@
+{
+  "date": "2026-10-02",
+  "environment": {
+    "python": "3.11.9",
+    "PySide6": "6.9.2",
+    "PyMuPDF": "1.26.3",
+    "PyInstaller": "6.19.0",
+    "platform": "Windows x64"
+  },
+  "transport": {
+    "text_200.pdf": {
+      "png_median_ms": 63.12,
+      "rgb_median_ms": 15.07
+    },
+    "image_heavy.pdf": {
+      "png_median_ms": 347.18,
+      "rgb_median_ms": 57.8
+    }
+  },
+  "imports": {
+    "before": {
+      "median_import_ms": 382.14,
+      "runs": [
+        433.69,
+        382.14,
+        380.0
+      ]
+    },
+    "after": {
+      "median_import_ms": 249.68,
+      "runs": [
+        249.68,
+        255.51,
+        247.83
+      ]
+    }
+  },
+  "export_200": {
+    "elapsed_ms": 8843.0,
+    "heartbeats": 871,
+    "max_heartbeat_gap_ms": 16.0,
+    "export_files": [
+      200
+    ],
+    "errors": []
+  },
+  "frozen_smoke": {
+    "1": {
+      "frozen": true,
+      "errors": [],
+      "scale": 1.0,
+      "first_render_ms": 156.0,
+      "viewport_width": 1070,
+      "raw_renders": 1,
+      "active_after_zoom": 2,
+      "pending_after_zoom": 3,
+      "search_hits": 30,
+      "export_files": 30,
+      "export_ms": 1109.0,
+      "export_heartbeats": 55,
+      "cancelled": true,
+      "passed": true,
+      "elapsed_ms": 1781.0
+    },
+    "1.25": {
+      "frozen": true,
+      "errors": [],
+      "scale": 1.25,
+      "first_render_ms": 157.0,
+      "viewport_width": 1070,
+      "raw_renders": 1,
+      "active_after_zoom": 2,
+      "pending_after_zoom": 3,
+      "search_hits": 30,
+      "export_files": 30,
+      "export_ms": 1125.0,
+      "export_heartbeats": 56,
+      "cancelled": true,
+      "passed": true,
+      "elapsed_ms": 1797.0
+    },
+    "1.5": {
+      "frozen": true,
+      "errors": [],
+      "scale": 1.5,
+      "first_render_ms": 172.0,
+      "viewport_width": 1070,
+      "raw_renders": 1,
+      "active_after_zoom": 2,
+      "pending_after_zoom": 3,
+      "search_hits": 30,
+      "export_files": 30,
+      "export_ms": 1094.0,
+      "export_heartbeats": 54,
+      "cancelled": true,
+      "passed": true,
+      "elapsed_ms": 1844.0
+    }
+  },
+  "frozen_formats": {
+    "passed": true,
+    "worker_jobs": [
+      {
+        "operation": "convert",
+        "outputs": 1,
+        "qt_imported": false
+      },
+      {
+        "operation": "convert",
+        "outputs": 1,
+        "qt_imported": false
+      },
+      {
+        "operation": "convert",
+        "outputs": 1,
+        "qt_imported": false
+      },
+      {
+        "operation": "convert",
+        "outputs": 1,
+        "qt_imported": false
+      },
+      {
+        "operation": "convert",
+        "outputs": 1,
+        "qt_imported": false
+      },
+      {
+        "operation": "convert",
+        "outputs": 1,
+        "qt_imported": false
+      },
+      {
+        "operation": "convert",
+        "outputs": 3,
+        "qt_imported": false
+      },
+      {
+        "operation": "convert",
+        "outputs": 3,
+        "qt_imported": false
+      },
+      {
+        "operation": "convert_to_pdf",
+        "outputs": 1,
+        "qt_imported": false
+      },
+      {
+        "operation": "convert_to_pdf",
+        "outputs": 1,
+        "qt_imported": false
+      },
+      {
+        "operation": "convert_to_pdf",
+        "outputs": 1,
+        "qt_imported": false
+      },
+      {
+        "operation": "convert_to_pdf",
+        "outputs": 1,
+        "qt_imported": false
+      },
+      {
+        "operation": "convert_to_pdf",
+        "outputs": 1,
+        "qt_imported": false
+      },
+      {
+        "operation": "convert_to_pdf",
+        "outputs": 1,
+        "qt_imported": false
+      },
+      {
+        "operation": "protect",
+        "outputs": 1,
+        "qt_imported": false
+      },
+      {
+        "operation": "unlock",
+        "outputs": 1,
+        "qt_imported": false
+      },
+      {
+        "operation": "merge",
+        "outputs": 1,
+        "qt_imported": false
+      },
+      {
+        "operation": "search",
+        "outputs": 0,
+        "qt_imported": false
+      }
+    ]
+  },
+  "package": {
+    "before_mib": 210.2,
+    "after_mib": 168.22,
+    "zip_mib": 71.73,
+    "sha256": "2fc1aa1ff71974ea632b4391abfe7ed7d242d62758b87f3e8a145174c0f3b567"
+  },
+  "source_build_commit": "ff02cf0"
+}
