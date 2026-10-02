@@ -22,8 +22,8 @@ Windows may show an unsigned-app prompt. Settings and outputs normally live in `
 - PDF tabs, zoom, fit width/page, continuous viewing, thumbnails, outlines, search, and text reflow
 - Merge, split, extract, delete, reorder, and rotate pages
 - Watermarks, image stamps, compression, password protection, and unlock
-- PDF export to DOCX, TXT, Markdown, HTML, JSON, RTF, PNG, and JPG
-- Create PDFs from text, Markdown, RTF, HTML, DOCX, images, and PDFs
+- PDF export to DOCX, TXT, Markdown, HTML, JSON, RTF, PNG, and JPG. Document exports contain extracted text; PNG/JPG preserve page appearance.
+- Create PDFs from text, Markdown, HTML, DOCX, images, and PDFs. DOCX and HTML import text only; layout and embedded images are not retained. RTF import is unsupported.
 - Optional GLM OCR runner for text, tables, formulas, and structured extraction
 
 ## Run from source
@@ -114,3 +114,9 @@ Virtual environments, build outputs, personal documents, session data, and model
 ## License
 
 Project source is covered by the repository's [MIT license](LICENSE). Third-party dependencies retain their own licenses; see [dependency notices](THIRD_PARTY.md). The repository license does not replace licenses of libraries bundled in the portable download.
+
+## Reader quality branch
+
+Tools run in cancellable local processes, with progress and safe publication of complete results. Reading stays responsive during exports. Existing files are never silently replaced. Use Open result or Show folder after an operation.
+
+The fresh layout gives reading most of the window. Pages and Outline share Navigation; Tools opens on demand. Fit Page works in both reader modes, and zoom keeps the current reading position. Ctrl+Tab / Ctrl+Shift+Tab switch documents; Ctrl+F finds text. Text preview is bounded to keep very large documents responsive; TXT export contains the full text.

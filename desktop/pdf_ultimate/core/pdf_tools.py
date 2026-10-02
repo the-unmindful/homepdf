@@ -34,34 +34,17 @@ class PdfToolkit:
         self.output_root.mkdir(parents=True, exist_ok=True)
 
     def inspect(self, pdf_path: Path, password: str | None = None) -> PdfInfo:
-        from pypdf import PdfReader, PdfWriter
-        pdf_path = pdf_path.resolve()
-        reader = PdfReader(str(pdf_path))
-        if reader.is_encrypted:
-            if not password:
-                raise PdfToolkitError("This PDF is password-protected.")
-            if reader.decrypt(password) == 0:
-                raise PdfToolkitError("Invalid password for encrypted PDF.")
-
-        metadata = reader.metadata or {}
-        permissions = {
-            "print": True,
-            "copy": True,
-            "modify": True,
-            "annotate": True,
-        }
-
-        return PdfInfo(
-            path=pdf_path,
-            page_count=len(reader.pages),
-            encrypted=reader.is_encrypted,
-            title=str(metadata.get("/Title", "")),
-            author=str(metadata.get("/Author", "")),
-            subject=str(metadata.get("/Subject", "")),
-            creator=str(metadata.get("/Creator", "")),
-            producer=str(metadata.get("/Producer", "")),
-            permissions=permissions,
-        )
+        with fitz.open(pdf_path) as doc:
+            if doc.needs_pass and (not password or not doc.authenticate(password)):
+                raise PdfToolkitError("A valid password is required to inspect this PDF.")
+            metadata = doc.metadata or {}
+            perms = doc.permissions
+            return PdfInfo(path=Path(pdf_path), page_count=doc.page_count, encrypted=doc.is_encrypted,
+                title=metadata.get('title', ''), author=metadata.get('author', ''),
+                subject=metadata.get('subject', ''), creator=metadata.get('creator', ''),
+                producer=metadata.get('producer', ''), permissions={
+                    'print': bool(perms & fitz.PDF_PERM_PRINT), 'copy': bool(perms & fitz.PDF_PERM_COPY),
+                    'modify': bool(perms & fitz.PDF_PERM_MODIFY), 'annotate': bool(perms & fitz.PDF_PERM_ANNOTATE)})
 
     @safe_outputs
     def merge(self, pdf_paths: Iterable[Path], output_path: Path) -> Path:
@@ -478,7 +461,6 @@ class PdfToolkit:
 
     @safe_outputs
     def convert(self, pdf_path: Path, target: str, output_dir: Path) -> ConversionResult:
-        from docx import Document
         source = Path(pdf_path).resolve()
         doc = fitz.open(str(source))
         if doc.needs_pass:
@@ -557,6 +539,7 @@ class PdfToolkit:
             return ConversionResult(target=target, outputs=[out])
 
         if target == "docx":
+            from docx import Document
             document = Document()
             document.add_heading(source.stem, level=1)
             for idx, page in enumerate(doc, start=1):
@@ -586,7 +569,6 @@ class PdfToolkit:
 
     @safe_outputs
     def convert_to_pdf(self, input_paths: Iterable[Path], output_path: Path) -> Path:
-        from docx import Document
         sources = [Path(path).resolve() for path in input_paths]
         if not sources:
             raise PdfToolkitError("At least one source file is required for convert-to-PDF.")
@@ -611,7 +593,10 @@ class PdfToolkit:
                     self._append_image_as_pdf_pages(out_doc, source)
                     continue
 
-                if suffix in {".txt", ".md", ".rtf"}:
+                if suffix == ".rtf":
+                    raise PdfToolkitError("RTF import is not supported. Save it as DOCX or plain text first.")
+
+                if suffix in {".txt", ".md"}:
                     text = source.read_text(encoding="utf-8", errors="ignore")
                     self._append_text_as_pdf_pages(out_doc, text, source.name)
                     continue
@@ -623,6 +608,7 @@ class PdfToolkit:
                     continue
 
                 if suffix == ".docx":
+                    from docx import Document
                     document = Document(str(source))
                     chunks = [paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip()]
                     text = "\n\n".join(chunks)

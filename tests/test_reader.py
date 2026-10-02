@@ -118,6 +118,16 @@ class ReaderTests(unittest.TestCase):
         offset = bar.value() - self.window.continuous_view.page_top(10)
         self.assertAlmostEqual(offset / self.window.zoom_factor, 300 / zoom, delta=2)
 
+    def test_tab_shortcuts_and_nonmodal_completion(self):
+        from PySide6.QtWidgets import QMessageBox
+        shortcuts = {action.shortcut().toString() for action in self.window.actions()}
+        self.assertIn("Ctrl+Tab", shortcuts)
+        self.assertIn("Ctrl+Shift+Tab", shortcuts)
+        with patch.object(QMessageBox, "information") as dialog:
+            self.window._show_result([self.source.with_suffix('.txt')], 'Saved.')
+            dialog.assert_not_called()
+        self.assertTrue(self.window.result_folder_button.isVisible())
+
     def test_fit_page_fits_height_in_continuous_mode(self):
         self.open_reader()
         self.window.main_splitter.setSizes([0, 1300, 0])

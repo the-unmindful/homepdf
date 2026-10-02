@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import multiprocessing
+import threading
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Qt, Signal
@@ -162,13 +163,20 @@ def run() -> int:
     bridge.activateRequested.connect(window.activateWindow)
     bridge.activateRequested.connect(window.raise_)
     window.show()
-    def register_start_shortcut() -> None:
-        if ensure_start_menu_shortcut() is False:
-            window.statusBar().showMessage(
-                'Could not add HomePDF to Start. Run "Add HomePDF to Start.cmd" in the app folder to try again.',
-                20000,
-            )
-    QTimer.singleShot(0, register_start_shortcut)
+    class ShortcutResult(QObject):
+        completed = Signal(object)
+    shortcut_result = ShortcutResult(window)
+    def show_shortcut_result(success):
+        if success is False:
+            window.statusBar().showMessage('Could not add HomePDF to Start. Use Add HomePDF to Start.cmd in the app folder.', 20000)
+    shortcut_result.completed.connect(show_shortcut_result)
+    def register_background():
+        success = ensure_start_menu_shortcut()
+        try:
+            shortcut_result.completed.emit(success)
+        except RuntimeError:
+            pass
+    threading.Thread(target=register_background, daemon=True, name="start-menu-registration").start()
     if startup_paths:
         QTimer.singleShot(0, lambda: window.open_documents(startup_paths))
     else:

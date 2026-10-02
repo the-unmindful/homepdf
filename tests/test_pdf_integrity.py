@@ -95,6 +95,12 @@ class PdfIntegrityTests(unittest.TestCase):
         with fitz.open(unlocked) as doc:
             self.assertEqual(next(doc[0].widgets()).field_value, 'Alice')
 
+    def test_rtf_import_rejects_raw_syntax(self):
+        rtf = self.source.with_suffix('.rtf')
+        rtf.write_text(r'{\rtf1 Hello}')
+        with self.assertRaisesRegex(Exception, "RTF"):
+            self.toolkit.convert_to_pdf([rtf], self.source.parent / 'rtf.pdf')
+
     def test_default_names_are_distinct_even_in_same_second(self):
         self.assertNotEqual(self.toolkit.default_output_path(self.source, 'rotate'),
                             self.toolkit.default_output_path(self.source, 'rotate'))

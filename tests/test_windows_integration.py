@@ -16,6 +16,8 @@ class StartMenuRegistrationTests(unittest.TestCase):
         self.folder = Path(self.temp.name).resolve()
         self.exe = self.folder / 'PDFUltimate.exe'
         self.exe.touch()
+        self.root_patch = patch("pdf_ultimate.windows_integration.app_root", return_value=self.folder)
+        self.root_patch.start(); self.addCleanup(self.root_patch.stop)
         (self.folder / 'scripts').mkdir()
         (self.folder / 'scripts' / 'create_start_menu_shortcut.ps1').touch()
 
@@ -30,6 +32,14 @@ class StartMenuRegistrationTests(unittest.TestCase):
             command = run.call_args.args[0]
             self.assertEqual(command[command.index('-ExePath') + 1], str(self.exe.resolve()))
             self.assertEqual(command[command.index('-File') + 1], str(self.folder / 'scripts' / 'create_start_menu_shortcut.ps1'))
+
+    def test_successful_registration_is_not_repeated(self):
+        with patch.object(sys, 'frozen', True, create=True), patch.object(sys, 'platform', 'win32'), patch.object(sys, 'executable', str(self.exe)), patch('pdf_ultimate.windows_integration.app_root', return_value=self.folder), patch.dict('os.environ', {'APPDATA': str(self.folder)}), patch('subprocess.run') as run:
+            shortcut = self.folder / 'Microsoft' / 'Windows' / 'Start Menu' / 'Programs' / 'HomePDF.lnk'
+            shortcut.parent.mkdir(parents=True); shortcut.touch()
+            self.assertTrue(windows_integration.ensure_start_menu_shortcut())
+            self.assertTrue(windows_integration.ensure_start_menu_shortcut())
+            self.assertEqual(run.call_count, 1)
 
     def test_failed_registration_does_not_prevent_reading_pdfs(self):
         with patch.object(sys, 'frozen', True, create=True), patch.object(sys, 'platform', 'win32'), patch.object(sys, 'executable', str(self.exe)), patch('subprocess.run', side_effect=subprocess.CalledProcessError(1, ['powershell'], stderr='Access denied')):

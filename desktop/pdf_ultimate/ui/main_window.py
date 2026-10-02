@@ -456,6 +456,18 @@ class PdfUltimateMainWindow(QMainWindow):
         self.job_cancel_button.clicked.connect(self.tool_jobs.cancel)
         self.statusBar().addPermanentWidget(self.job_cancel_button)
         self.job_cancel_button.hide()
+        self.result_open_button = QPushButton("Open result")
+        self.result_open_button.clicked.connect(self._open_last_result)
+        self.result_folder_button = QPushButton("Show folder")
+        self.result_folder_button.clicked.connect(self._show_last_result_folder)
+        self.statusBar().addPermanentWidget(self.result_open_button)
+        self.statusBar().addPermanentWidget(self.result_folder_button)
+        self.result_open_button.hide(); self.result_folder_button.hide()
+        self._last_outputs = []
+        self.page_jump_spin.setAccessibleName("Page number")
+        self.zoom_combo.setAccessibleName("Zoom percentage")
+        self.navigation_combo.setAccessibleName("Navigation pane")
+        self.search_input.setAccessibleName("Find in document")
         self._refresh_recent_files_menu()
         self.statusBar().showMessage("Ready. Drop a PDF or click Open PDF.")
 
@@ -965,6 +977,8 @@ class PdfUltimateMainWindow(QMainWindow):
 
     def _setup_reader_shortcuts(self) -> None:
         bindings = [
+            ("Ctrl+Tab", lambda: self._cycle_document_tab(1)),
+            ("Ctrl+Shift+Tab", lambda: self._cycle_document_tab(-1)),
             ("Down", lambda: self._reader_scroll_vertical(54)),
             ("Up", lambda: self._reader_scroll_vertical(-54)),
             ("PageDown", lambda: self._reader_page_scroll(True)),
@@ -982,6 +996,11 @@ class PdfUltimateMainWindow(QMainWindow):
             action.setShortcutContext(Qt.WindowShortcut)
             action.triggered.connect(handler)
             self.addAction(action)
+
+    def _cycle_document_tab(self, direction):
+        count = self.document_tabs.count()
+        if count:
+            self.document_tabs.setCurrentIndex((self.document_tabs.currentIndex() + direction) % count)
 
     def _jump_to_page_from_spin(self) -> None:
         if self.current_doc is None:
@@ -1286,7 +1305,9 @@ class PdfUltimateMainWindow(QMainWindow):
         layout.setSpacing(8)
 
         self.convert_target = QComboBox()
-        self.convert_target.addItems(["docx", "txt", "md", "html", "json", "rtf", "png", "jpg"])
+        for target in ["docx", "txt", "md", "html", "json", "rtf", "png", "jpg"]:
+            label = target.upper() + (" (text only)" if target in {"docx", "md", "html", "rtf"} else "")
+            self.convert_target.addItem(label, target)
         convert_btn = QPushButton("Convert Document")
         convert_btn.clicked.connect(self._convert_document)
         layout.addWidget(QLabel("Convert PDF To"))
@@ -1294,7 +1315,8 @@ class PdfUltimateMainWindow(QMainWindow):
         layout.addWidget(convert_btn)
 
         layout.addSpacing(6)
-        layout.addWidget(QLabel("Convert To PDF (drop files and reorder)"))
+        layout.addWidget(QLabel("Create PDF (drop files and reorder)"))
+        layout.addWidget(QLabel("DOCX and HTML import text only. Formatting and embedded images are not preserved. Image imports retain their visual content."))
         self.to_pdf_list = FileDropListWidget()
         self.to_pdf_list.setMinimumHeight(120)
         self.to_pdf_list.filesDropped.connect(self._on_to_pdf_files_dropped)
@@ -4136,7 +4158,7 @@ class PdfUltimateMainWindow(QMainWindow):
     def _convert_document(self) -> None:
         try:
             source = self._require_current_pdf()
-            target = self.convert_target.currentText()
+            target = self.convert_target.currentData()
             output_dir = output_root() / f"{source.stem}_convert_{target}"
             self._submit_tool("convert", source, target, output_dir, message=f"Converted to {target}.")
         except Exception as exc:
@@ -4147,7 +4169,7 @@ class PdfUltimateMainWindow(QMainWindow):
             self,
             "Add Files To Convert Into PDF",
             "",
-            "Supported Files (*.txt *.md *.rtf *.html *.htm *.docx *.png *.jpg *.jpeg *.bmp *.tif *.tiff *.pdf)",
+            "Supported Files (*.txt *.md *.html *.htm *.docx *.png *.jpg *.jpeg *.bmp *.tif *.tiff *.pdf)",
         )
         for path in paths:
             self._append_to_pdf_source(Path(path))
@@ -4336,15 +4358,23 @@ class PdfUltimateMainWindow(QMainWindow):
         self.statusBar().showMessage(message)
         if not outputs:
             return
-        first = outputs[0]
-        details = [message, "", f"Output folder: {first.parent}", "", "Created files:"]
-        details.extend(str(path.name) for path in outputs[:10])
-        if len(outputs) > 10:
-            details.append(f"... and {len(outputs) - 10} more")
-        QMessageBox.information(self, "Operation Complete", "\n".join(details))
+        self._last_outputs = list(outputs)
+        self.result_open_button.setVisible(len(outputs) == 1)
+        self.result_folder_button.show()
+        self.statusBar().showMessage(f"{message} {len(outputs)} file(s) saved in {outputs[0].parent}")
 
-        if len(outputs) == 1 and outputs[0].suffix.lower() == ".pdf":
-            self._set_active_document_tab(outputs[0], record_doc_history=True)
+    def _open_last_result(self):
+        if not self._last_outputs:
+            return
+        path = self._last_outputs[0]
+        if path.suffix.lower() == '.pdf':
+            self._set_active_document_tab(path, record_doc_history=True)
+        else:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def _show_last_result_folder(self):
+        if self._last_outputs:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._last_outputs[0].parent)))
 
     def _show_error(self, error: Exception) -> None:
         text = str(error) if str(error) else error.__class__.__name__
