@@ -49,6 +49,7 @@ from PySide6.QtWidgets import (
 from pdf_ultimate.core.paths import output_root
 from pdf_ultimate.core.pdf_tools import PdfToolkit, PdfToolkitError, ProtectOptions
 from pdf_ultimate.core.worker_tasks import SearchResult, bounded_scale
+from pdf_ultimate.ui.thumbnails import ThumbnailDelegate
 from pdf_ultimate.core.render_service import PdfRenderService
 from pdf_ultimate.core.job_service import JobService
 from pdf_ultimate.core.state_store import AppStateStore, DocumentViewState
@@ -213,7 +214,8 @@ class PdfUltimateMainWindow(QMainWindow):
         self._text_search_spans: list[tuple[int, int]] = []
         self._text_search_cursor = -1
         self._thumb_zoom = 0.19
-        self._thumb_quality = 1.0
+        screen = QGuiApplication.primaryScreen()
+        self._thumb_quality = max(1.0, round(float(screen.devicePixelRatio()), 2)) if screen else 1.0
         self._thumbnail_items_by_page: dict[int, QListWidgetItem] = {}
         self.outline_targets: list[int] = []
         self._default_main_sizes = [220, 1100, 0]
@@ -702,7 +704,15 @@ class PdfUltimateMainWindow(QMainWindow):
         self.body_split.setOpaqueResize(False)
         self.body_split.setCollapsible(0, True)
         self.thumbnail_list = QListWidget()
-        self.thumbnail_list.setIconSize(QSize(90, 124))
+        self.thumbnail_list.setIconSize(QSize(96, 132))
+        self.thumbnail_list.setItemDelegate(ThumbnailDelegate(self.thumbnail_list.iconSize(), self.thumbnail_list))
+        self.thumbnail_list.setUniformItemSizes(True)
+        self.thumbnail_list.setMouseTracking(True)
+        self.thumbnail_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.thumbnail_list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.thumbnail_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.thumbnail_list.customContextMenuRequested.connect(self._show_thumbnail_menu)
+        self.thumbnail_list.setObjectName("thumbnailList")
         self.thumbnail_list.setMinimumWidth(96)
         self.thumbnail_list.setMaximumWidth(380)
         self.thumbnail_list.setDragDropMode(QAbstractItemView.InternalMove)
@@ -743,6 +753,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self.continuous_view = ContinuousPageView(
             self._get_or_request_page_image,
             highlight_provider=self._search_highlights_for_page,
+            placeholder_provider=self._placeholder_image_for_page,
             active_highlight_provider=self._active_search_hit,
             word_provider=self._selection_words_for_page,
         )
@@ -1130,27 +1141,27 @@ class PdfUltimateMainWindow(QMainWindow):
         layout = QVBoxLayout(tab)
         layout.setSpacing(8)
 
-        self.extract_selection_input = QLineEdit("1-3")
-        self.extract_selection_input.setPlaceholderText("Extract pages, e.g. 1-3,8")
+        self.extract_selection_input = QLineEdit()
+        self.extract_selection_input.setPlaceholderText("Pages, e.g. 1-3,8 (blank = selected)")
         extract_btn = QPushButton("Extract Selected Pages")
         extract_btn.clicked.connect(self._extract_pages_from_ui)
         layout.addWidget(QLabel("Extract Pages"))
         layout.addWidget(self.extract_selection_input)
         layout.addWidget(extract_btn)
 
-        self.delete_selection_input = QLineEdit("2")
-        self.delete_selection_input.setPlaceholderText("Delete pages, e.g. 2,4-5")
+        self.delete_selection_input = QLineEdit()
+        self.delete_selection_input.setPlaceholderText("Pages, e.g. 2,4-5 (blank = selected)")
         delete_btn = QPushButton("Delete Pages")
         delete_btn.clicked.connect(self._delete_pages)
         layout.addWidget(QLabel("Delete Pages"))
         layout.addWidget(self.delete_selection_input)
         layout.addWidget(delete_btn)
 
-        self.reorder_input = QLineEdit("1,3,2,4-6")
+        self.reorder_input = QLineEdit()
         self.reorder_input.setPlaceholderText("New order, e.g. 1,3,2,4-6")
         reorder_btn = QPushButton("Reorder Pages")
         reorder_btn.clicked.connect(self._reorder_pages)
-        apply_thumb_reorder_btn = QPushButton("Apply Thumbnail Drag Order")
+        apply_thumb_reorder_btn = QPushButton("Save Thumbnail Order as PDF")
         apply_thumb_reorder_btn.clicked.connect(self._apply_thumbnail_order)
         layout.addWidget(QLabel("Reorder"))
         layout.addWidget(self.reorder_input)
@@ -1158,8 +1169,8 @@ class PdfUltimateMainWindow(QMainWindow):
         layout.addWidget(apply_thumb_reorder_btn)
 
         rotate_row = QHBoxLayout()
-        self.rotate_selection_input = QLineEdit("1-")
-        self.rotate_selection_input.setPlaceholderText("Pages to rotate")
+        self.rotate_selection_input = QLineEdit()
+        self.rotate_selection_input.setPlaceholderText("Pages, e.g. 1-3 (blank = selected or all)")
         self.rotate_degrees = VisibleComboBox()
         self.rotate_degrees.addItems(["90", "180", "270"])
         rotate_row.addWidget(self.rotate_selection_input)
@@ -1170,7 +1181,7 @@ class PdfUltimateMainWindow(QMainWindow):
         layout.addLayout(rotate_row)
         layout.addWidget(rotate_btn)
 
-        self.split_ranges_input = QLineEdit("1-3,4-8")
+        self.split_ranges_input = QLineEdit()
         self.split_ranges_input.setPlaceholderText("Ranges for split, e.g. 1-3,4-8")
         split_ranges_btn = QPushButton("Split by Ranges")
         split_ranges_btn.clicked.connect(self._split_ranges)
@@ -1960,9 +1971,10 @@ class PdfUltimateMainWindow(QMainWindow):
         layout = QVBoxLayout(tab)
         layout.setSpacing(8)
 
-        self.watermark_text = QLineEdit("CONFIDENTIAL")
-        self.watermark_pages = QLineEdit("1-")
-        self.watermark_pages.setPlaceholderText("Pages for watermark, e.g. 1- or 2,4")
+        self.watermark_text = QLineEdit()
+        self.watermark_text.setPlaceholderText("Watermark text, e.g. CONFIDENTIAL")
+        self.watermark_pages = QLineEdit()
+        self.watermark_pages.setPlaceholderText("All pages, or e.g. 2,4")
         self.watermark_opacity = QDoubleSpinBox()
         self.watermark_opacity.setRange(0.05, 1.0)
         self.watermark_opacity.setSingleStep(0.05)
@@ -1986,8 +1998,8 @@ class PdfUltimateMainWindow(QMainWindow):
         self.annotate_query_input = QLineEdit()
         self.annotate_query_input.setPlaceholderText("Text to mark")
         annotate_row = QHBoxLayout()
-        self.annotate_pages_input = QLineEdit("1-")
-        self.annotate_pages_input.setPlaceholderText("Pages")
+        self.annotate_pages_input = QLineEdit()
+        self.annotate_pages_input.setPlaceholderText("All pages")
         self.annotate_style = VisibleComboBox()
         self.annotate_style.addItems(["Highlight", "Underline", "Strikeout"])
         annotate_row.addWidget(self.annotate_pages_input)
@@ -2002,8 +2014,8 @@ class PdfUltimateMainWindow(QMainWindow):
         layout.addWidget(QLabel("Redact Text Matches"))
         self.redact_query_input = QLineEdit()
         self.redact_query_input.setPlaceholderText("Text to redact permanently")
-        self.redact_pages_input = QLineEdit("1-")
-        self.redact_pages_input.setPlaceholderText("Pages")
+        self.redact_pages_input = QLineEdit()
+        self.redact_pages_input.setPlaceholderText("All pages")
         redact_btn = QPushButton("Redact Matches")
         redact_btn.clicked.connect(self._redact_matches)
         layout.addWidget(self.redact_query_input)
@@ -2020,8 +2032,8 @@ class PdfUltimateMainWindow(QMainWindow):
         stamp_pick_row.addWidget(self.stamp_image_path)
         stamp_pick_row.addWidget(pick_stamp_btn)
         stamp_opts_row = QHBoxLayout()
-        self.stamp_pages_input = QLineEdit("1-")
-        self.stamp_pages_input.setPlaceholderText("Pages")
+        self.stamp_pages_input = QLineEdit()
+        self.stamp_pages_input.setPlaceholderText("All pages")
         self.stamp_anchor = VisibleComboBox()
         self.stamp_anchor.addItems(["Bottom Right", "Bottom Left", "Top Right", "Top Left", "Center"])
         self.stamp_scale = QDoubleSpinBox()
@@ -2751,6 +2763,10 @@ class PdfUltimateMainWindow(QMainWindow):
                 return cached
         return None
 
+    def _placeholder_image_for_page(self, index: int) -> QImage | None:
+        """Cached thumbnail shown (scaled) while the sharp page renders."""
+        return self._cache_get_image(self._thumbnail_key(index))
+
     def _prefetch_neighbor_pages(self, center_row_index: int, span: int = 2) -> None:
         if self.current_doc is None:
             return
@@ -2782,12 +2798,13 @@ class PdfUltimateMainWindow(QMainWindow):
         item = self._thumbnail_items_by_page.get(actual_idx)
         if item is None:
             return
-        pixmap = QPixmap.fromImage(image)
-        icon_pixmap = pixmap.scaled(
-            self.thumbnail_list.iconSize(),
+        dpr = max(1.0, float(self.thumbnail_list.devicePixelRatioF()))
+        icon_pixmap = QPixmap.fromImage(image).scaled(
+            self.thumbnail_list.iconSize() * dpr,
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation,
         )
+        icon_pixmap.setDevicePixelRatio(dpr)
         item.setIcon(QIcon(icon_pixmap))
 
     def _schedule_visible_thumbnail_renders(self) -> None:
@@ -2955,12 +2972,12 @@ class PdfUltimateMainWindow(QMainWindow):
             y = int(y0 * scale)
             w = max(2, int((x1 - x0) * scale))
             h = max(2, int((y1 - y0) * scale))
+            painter.setCompositionMode(QPainter.CompositionMode_Multiply)
+            painter.fillRect(x, y, w, h, QColor(255, 170, 60) if idx == active_rect_index else QColor(255, 236, 120))
+            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
             if idx == active_rect_index:
-                painter.fillRect(x, y, w, h, QColor(255, 191, 46, 188))
-                painter.setPen(QColor(222, 123, 29, 225))
-                painter.drawRect(x, y, w, h)
-            else:
-                painter.fillRect(x, y, w, h, QColor(255, 232, 120, 112))
+                painter.setPen(QPen(QColor(214, 102, 0), 2))
+                painter.drawRoundedRect(x - 2, y - 2, w + 4, h + 4, 2, 2)
         painter.end()
         return overlay
 
@@ -3189,9 +3206,13 @@ class PdfUltimateMainWindow(QMainWindow):
 
         if self.view_mode == "continuous":
             self.current_page_index = display_idx
-            page_top = self.continuous_view.page_top(display_idx)
-            scroll_y = page_top + int(y0 * self.zoom_factor) - 64
-            self.page_scroll.verticalScrollBar().setValue(max(0, scroll_y))
+            hit_y = self.continuous_view.page_top(display_idx) + int(y0 * self.zoom_factor)
+            vbar = self.page_scroll.verticalScrollBar()
+            height = self.page_scroll.viewport().height()
+            # Leave the view alone when the hit is already comfortably visible;
+            # otherwise put it a third of the way down, never flush with the edge.
+            if not (vbar.value() + 48 <= hit_y <= vbar.value() + height - 96):
+                vbar.setValue(max(0, hit_y - height // 3))
             if self.thumbnail_list.currentRow() != display_idx:
                 self.thumbnail_list.blockSignals(True)
                 self.thumbnail_list.setCurrentRow(display_idx)
@@ -3204,7 +3225,7 @@ class PdfUltimateMainWindow(QMainWindow):
         self._set_page(display_idx, record_history=False)
         vbar = self.page_scroll.verticalScrollBar()
         hbar = self.page_scroll.horizontalScrollBar()
-        vbar.setValue(max(0, min(vbar.maximum(), int(y0 * self.zoom_factor) - 64)))
+        vbar.setValue(max(0, min(vbar.maximum(), int(y0 * self.zoom_factor) - self.page_scroll.viewport().height() // 3)))
         hbar.setValue(max(0, min(hbar.maximum(), int(x0 * self.zoom_factor) - 36)))
 
     def _capture_reading_anchor(self) -> tuple[int, float, float] | None:
@@ -3253,9 +3274,12 @@ class PdfUltimateMainWindow(QMainWindow):
             self._update_zoom_label()
             return
         signature = (self._active_doc_token(), round(self.zoom_factor, 3))
-        if getattr(self, "_render_signature", None) != signature:
-            self.renderer.invalidate()
+        previous_signature = getattr(self, "_render_signature", None)
+        if previous_signature != signature:
+            same_document = previous_signature is not None and previous_signature[0] == signature[0]
+            self.renderer.invalidate(keep_thumbnails=same_document)
             self._render_signature = signature
+            self._schedule_visible_thumbnail_renders()
         anchor = self._capture_reading_anchor()
         if self.view_mode == "continuous":
             self.page_stack.setCurrentWidget(self.page_image)
@@ -3495,12 +3519,9 @@ class PdfUltimateMainWindow(QMainWindow):
         self._schedule_state_save()
 
     def _effective_render_quality(self, page_index: int | None = None, zoom: float | None = None) -> float:
-        dpr = max(1.0, float(self.devicePixelRatioF()))
-        if self.view_mode == "continuous":
-            base = max(1.2, min(2.1, dpr * 1.35))
-        else:
-            # Keep single-page mode crisp while respecting memory limits.
-            base = max(2.0, min(3.2, dpr * 2.1))
+        # Render at exactly the screen's device pixel ratio so each rendered pixel maps
+        # 1:1 to a screen pixel. Oversampling and then resampling softens text glyphs.
+        base = max(1.0, min(4.0, round(float(self.devicePixelRatioF()), 2)))
 
         if self.current_doc is None or page_index is None:
             return base
@@ -3933,7 +3954,7 @@ class PdfUltimateMainWindow(QMainWindow):
         try:
             source = self._require_current_pdf()
             output = self.toolkit.default_output_path(source, "extract")
-            self._submit_tool("extract_pages", source, self.extract_selection_input.text(), output, message="Pages extracted.")
+            self._submit_tool("extract_pages", source, self._page_selection_text(self.extract_selection_input), output, message="Pages extracted.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -3941,7 +3962,7 @@ class PdfUltimateMainWindow(QMainWindow):
         try:
             source = self._require_current_pdf()
             output = self.toolkit.default_output_path(source, "deleted")
-            self._submit_tool("delete_pages", source, self.delete_selection_input.text(), output, message="Pages deleted.")
+            self._submit_tool("delete_pages", source, self._page_selection_text(self.delete_selection_input), output, message="Pages deleted.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -3950,6 +3971,62 @@ class PdfUltimateMainWindow(QMainWindow):
             source = self._require_current_pdf()
             output = self.toolkit.default_output_path(source, "reordered")
             self._submit_tool("reorder_pages", source, self.reorder_input.text(), output, message="Pages reordered.")
+        except Exception as exc:
+            self._show_error(exc)
+
+    def _selected_thumbnail_pages(self) -> list[int]:
+        """Actual (file) page numbers, 1-based, of the selected thumbnails in view order."""
+        rows = sorted(self.thumbnail_list.row(item) for item in self.thumbnail_list.selectedItems())
+        pages = []
+        for row in rows:
+            actual = self.thumbnail_list.item(row).data(Qt.UserRole)
+            if isinstance(actual, int):
+                pages.append(actual + 1)
+        return pages
+
+    def _page_selection_text(self, field: QLineEdit, *, default_all: bool = False) -> str:
+        """Field text, else several selected thumbnails, else all pages when allowed."""
+        text = field.text().strip()
+        if text:
+            return text
+        pages = self._selected_thumbnail_pages()
+        if len(pages) > 1 or (pages and not default_all):
+            return ",".join(str(page) for page in pages)
+        if default_all:
+            return "1-"
+        raise PdfToolkitError("Enter pages (for example 2,4-6) or select pages in the thumbnails.")
+
+    def _show_thumbnail_menu(self, pos) -> None:
+        if self.current_doc is None:
+            return
+        item = self.thumbnail_list.itemAt(pos)
+        if item is not None and not item.isSelected():
+            self.thumbnail_list.setCurrentItem(item)
+        pages = self._selected_thumbnail_pages()
+        if not pages:
+            return
+        text = ",".join(str(page) for page in pages)
+        label = f"page {pages[0]}" if len(pages) == 1 else f"{len(pages)} pages"
+        menu = QMenu(self)
+        menu.addAction(f"Rotate {label} clockwise", lambda: self._run_page_tool("rotate_pages", text, 90))
+        menu.addAction(f"Rotate {label} counter-clockwise", lambda: self._run_page_tool("rotate_pages", text, 270))
+        menu.addSeparator()
+        menu.addAction(f"Extract {label} to new PDF", lambda: self._run_page_tool("extract_pages", text))
+        delete = menu.addAction(f"Delete {label}", lambda: self._run_page_tool("delete_pages", text))
+        delete.setEnabled(len(pages) < self.current_doc.page_count)
+        if self.page_order and self.page_order != list(range(len(self.page_order))):
+            menu.addSeparator()
+            menu.addAction("Save new page order as PDF", self._apply_thumbnail_order)
+        menu.exec(self.thumbnail_list.viewport().mapToGlobal(pos))
+
+    def _run_page_tool(self, operation: str, selection: str, degrees: int | None = None) -> None:
+        names = {"rotate_pages": "rotated", "extract_pages": "extract", "delete_pages": "deleted"}
+        messages = {"rotate_pages": "Pages rotated.", "extract_pages": "Pages extracted.", "delete_pages": "Pages deleted."}
+        try:
+            source = self._require_current_pdf()
+            output = self.toolkit.default_output_path(source, names[operation])
+            args = (source, selection, degrees, output) if operation == "rotate_pages" else (source, selection, output)
+            self._submit_tool(operation, *args, message=messages[operation])
         except Exception as exc:
             self._show_error(exc)
 
@@ -3972,7 +4049,7 @@ class PdfUltimateMainWindow(QMainWindow):
             source = self._require_current_pdf()
             output = self.toolkit.default_output_path(source, "rotated")
             degrees = int(self.rotate_degrees.currentText())
-            self._submit_tool("rotate_pages", source, self.rotate_selection_input.text(), degrees, output, message="Rotation complete.")
+            self._submit_tool("rotate_pages", source, self._page_selection_text(self.rotate_selection_input, default_all=True), degrees, output, message="Rotation complete.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4100,7 +4177,7 @@ class PdfUltimateMainWindow(QMainWindow):
         try:
             source = self._require_current_pdf()
             output = self.toolkit.default_output_path(source, "watermark")
-            self._submit_tool("watermark_text", source, self.watermark_text.text(), output, message="Watermark applied.", selection=self.watermark_pages.text(), opacity=float(self.watermark_opacity.value()))
+            self._submit_tool("watermark_text", source, self.watermark_text.text(), output, message="Watermark applied.", selection=self.watermark_pages.text().strip() or "1-", opacity=float(self.watermark_opacity.value()))
         except Exception as exc:
             self._show_error(exc)
 
@@ -4117,7 +4194,7 @@ class PdfUltimateMainWindow(QMainWindow):
             source = self._require_current_pdf()
             style_text = self.annotate_style.currentText().strip().lower()
             output = self.toolkit.default_output_path(source, f"{style_text}_annotated")
-            self._submit_tool("annotate_text_matches", source, self.annotate_query_input.text(), self.annotate_pages_input.text(), style_text, output, message=f"{style_text.title()} annotations added.")
+            self._submit_tool("annotate_text_matches", source, self.annotate_query_input.text(), self.annotate_pages_input.text().strip() or "1-", style_text, output, message=f"{style_text.title()} annotations added.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4125,7 +4202,7 @@ class PdfUltimateMainWindow(QMainWindow):
         try:
             source = self._require_current_pdf()
             output = self.toolkit.default_output_path(source, "redacted")
-            self._submit_tool("redact_text_matches", source, self.redact_query_input.text(), self.redact_pages_input.text(), output, message="Redaction complete.")
+            self._submit_tool("redact_text_matches", source, self.redact_query_input.text(), self.redact_pages_input.text().strip() or "1-", output, message="Redaction complete.")
         except Exception as exc:
             self._show_error(exc)
 
@@ -4153,7 +4230,7 @@ class PdfUltimateMainWindow(QMainWindow):
             if not image_path.is_file():
                 raise PdfToolkitError(f"Stamp image not found: {image_path}")
             output = self.toolkit.default_output_path(source, "stamped")
-            self._submit_tool("stamp_image", source, image_path, self.stamp_pages_input.text(), output, message="Stamp applied.", anchor=self._anchor_label_to_value(self.stamp_anchor.currentText()), width_ratio=float(self.stamp_scale.value()))
+            self._submit_tool("stamp_image", source, image_path, self.stamp_pages_input.text().strip() or "1-", output, message="Stamp applied.", anchor=self._anchor_label_to_value(self.stamp_anchor.currentText()), width_ratio=float(self.stamp_scale.value()))
         except Exception as exc:
             self._show_error(exc)
 

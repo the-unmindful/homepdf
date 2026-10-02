@@ -4,7 +4,7 @@ from collections.abc import Callable
 from bisect import bisect_right
 
 from PySide6.QtCore import QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent, QPalette
+from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent, QPalette, QPen
 from PySide6.QtWidgets import QWidget
 from .selectable_page import SelectablePageLabel
 
@@ -19,12 +19,14 @@ class ContinuousPageView(SelectablePageLabel):
         active_highlight_provider: Callable[[], tuple[int, int] | None] | None = None,
         parent: QWidget | None = None,
         word_provider: Callable[[int], list[tuple]] | None = None,
+        placeholder_provider: Callable[[int], QImage | None] | None = None,
     ) -> None:
         super().__init__(parent=parent)
         self._image_provider = image_provider
         self._highlight_provider = highlight_provider
         self._active_highlight_provider = active_highlight_provider
         self._word_provider = word_provider
+        self._placeholder_provider = placeholder_provider
         self._selection_row = -1
         self._page_indices: list[int] = []
         self._page_rects: list[QRect] = []
@@ -131,24 +133,29 @@ class ContinuousPageView(SelectablePageLabel):
                         active_hit = self._active_highlight_provider() if self._active_highlight_provider is not None else None
                         painter.save()
                         painter.setPen(Qt.NoPen)
+                        painter.setCompositionMode(QPainter.CompositionMode_Multiply)
+                        active_box = None
                         for highlight_idx, (x0, y0, x1, y1) in enumerate(highlights):
                             x = rect.left() + int(x0 * self._zoom)
                             y = rect.top() + int(y0 * self._zoom)
                             w = max(2, int((x1 - x0) * self._zoom))
                             h = max(2, int((y1 - y0) * self._zoom))
                             if active_hit is not None and active_hit[0] == page_index and active_hit[1] == highlight_idx:
-                                painter.setBrush(QColor(255, 196, 57, 168))
-                                painter.drawRect(x, y, w, h)
-                                painter.setPen(QColor(224, 129, 28, 210))
-                                painter.drawRect(x, y, w, h)
-                                painter.setPen(Qt.NoPen)
+                                painter.fillRect(x, y, w, h, QColor(255, 170, 60))
+                                active_box = (x, y, w, h)
                             else:
-                                painter.setBrush(QColor(255, 232, 120, 105))
-                                painter.drawRect(x, y, w, h)
+                                painter.fillRect(x, y, w, h, QColor(255, 236, 120))
+                        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+                        if active_box is not None:
+                            painter.setBrush(Qt.NoBrush)
+                            painter.setPen(QPen(QColor(214, 102, 0), 2))
+                            x, y, w, h = active_box
+                            painter.drawRoundedRect(x - 2, y - 2, w + 4, h + 4, 2, 2)
                         painter.restore()
             else:
-                painter.setPen(QColor("#5f6b7f"))
-                painter.drawText(rect, Qt.AlignCenter, "Rendering...")
+                placeholder = self._placeholder_provider(page_index) if self._placeholder_provider else None
+                if placeholder is not None:
+                    painter.drawImage(rect, placeholder)
 
         if self._selection_row >= 0:
             self.paint_selection(painter, self._pixmap_rect())

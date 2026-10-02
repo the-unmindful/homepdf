@@ -26,11 +26,21 @@ class PdfRenderService(QObject):
     def pending_count(self):
         return len(self._pending)
 
-    def invalidate(self):
+    def invalidate(self, *, keep_thumbnails=False):
+        """Drop obsolete work. Thumbnails (priority 2) are zoom-independent, so a
+        zoom-only change keeps them instead of discarding in-flight renders."""
         self._generation += 1
-        self._pending.clear()
-        for future in list(self._active):
-            future.cancel()
+        if keep_thumbnails:
+            self._pending = OrderedDict(
+                (key, (job[0], self._generation, job[2])) for key, job in self._pending.items() if job[0] == 2
+            )
+        else:
+            self._pending.clear()
+        for future, (key, _generation, priority) in list(self._active.items()):
+            if keep_thumbnails and priority == 2:
+                self._active[future] = (key, self._generation, priority)
+            else:
+                future.cancel()
 
     def retain(self, keys):
         wanted = set(keys)
@@ -52,7 +62,7 @@ class PdfRenderService(QObject):
             key = min(self._pending, key=lambda item: self._pending[item][0])
             priority, generation, args = self._pending.pop(key)
             future = self._executor.submit(render_page_pixels, *args)
-            self._active[future] = (key, generation)
+            self._active[future] = (key, generation, priority)
             future.add_done_callback(self._done)
 
     def _done(self, future):
