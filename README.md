@@ -2,7 +2,11 @@
 
 HomePDF (shown as **HOME PDF** in the app) is a Windows desktop PDF reader and toolkit built with PySide6 and PyMuPDF. PDF reading and editing run locally on your computer.
 
-![HomePDF icon](desktop/pdf_ultimate/resources/app.png)
+![HomePDF reading a document with page thumbnails](docs/screenshots/reader-light.png)
+
+| Find in document (dark theme) | Tools, one card at a time | Start screen |
+| --- | --- | --- |
+| ![Search highlights in dark theme](docs/screenshots/search-dark.png) | ![Tools pane with page tools](docs/screenshots/tools.png) | ![Start screen with recent files](docs/screenshots/start-screen.png) |
 
 ## Download and run
 
@@ -13,13 +17,17 @@ HomePDF (shown as **HOME PDF** in the app) is a Windows desktop PDF reader and t
 3. Run `PDFUltimate.exe`. Keep `_internal`, `scripts`, and `ocr_tool` beside the executable.
 4. Open a PDF in the app, or drag a PDF onto the executable.
 
-The reader requires no Python installation. The portable package includes the white H on deep green app icon and creates its HomePDF Start menu shortcut when first opened. Source package version is `0.1.1`. See the release page for the current build and checksum.
+The reader requires no Python installation. The portable package includes the white H on deep green app icon and creates its HomePDF Start menu shortcut when first opened. Source package version is `0.2.0b2`. See the release page for the current build and checksum.
 
 Windows may show an unsigned-app prompt. Settings and outputs normally live in `Documents\HOME PDF`. To keep them beside the executable, create an empty `portable.flag` file in the extracted folder; data will then use `HOME PDF_DATA`.
 
 ## Features
 
-- PDF tabs, zoom, fit width/page, continuous viewing, thumbnails, outlines, search, and text reflow
+- Crisp rendering at your display's exact resolution, smooth continuous scrolling, and zoom that stays anchored under the cursor (Ctrl+wheel, touchpad pinch, Ctrl+= / Ctrl+-)
+- Select and copy text directly on the page; search with legible highlights
+- PDF tabs, fit width/page, thumbnails, outlines, plain-text view, printing (Ctrl+P), and automatic reload when the file changes on disk; open files are never locked
+- Password-protected PDFs ask for their password when opened
+- Right-click selected thumbnails to rotate, extract, or delete pages
 - Merge, split, extract, delete, reorder, and rotate pages
 - Watermarks, image stamps, compression, password protection, and unlock
 - PDF export to DOCX, TXT, Markdown, HTML, JSON, RTF, PNG, and JPG. Document exports contain extracted text; PNG/JPG preserve page appearance.
